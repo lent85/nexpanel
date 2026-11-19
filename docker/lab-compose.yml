@@ -1,0 +1,130 @@
+# NexPanel Lab Environment
+# Topology per docs/03 §3.3.1 and docs/09 §9.1
+# External network `proxy` MUST be created before starting:
+#   docker network create proxy
+# Then:
+#   docker compose -f docker/lab-compose.yml up -d
+
+services:
+  # 1. External Reverse Proxy (NPM 2.16.0) — Owns 80/443 exclusively (R1 Hard Rule)
+  npm:
+    image: jc21/nginx-proxy-manager:2.16.0
+    container_name: npm
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "127.0.0.1:81:81"
+    environment:
+      DISABLE_IPV6: "true"
+    volumes:
+      - npm-data:/data
+      - npm-letsencrypt:/etc/letsencrypt
+    networks:
+      - proxy
+
+  # 2. Panel Metadata DB (PostgreSQL 16)
+  nexpanel-db:
+    image: postgres:16-alpine
+    container_name: nexpanel-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PANEL_DB_NAME:-nexpanel}
+      POSTGRES_USER: ${PANEL_DB_USER:-nexpanel}
+      POSTGRES_PASSWORD: ${PANEL_DB_PASSWORD:-nexpanel_secret}
+    volumes:
+      - nexpanel-db-data:/var/lib/postgresql/data
+    networks:
+      - panel
+
+  # 3. Internal MySQL 8.4 Engine (Toggleable — R2 Hard Rule)
+  nexpanel-mysql:
+    image: mysql:8.4
+    container_name: nexpanel-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${INTERNAL_MYSQL_ROOT_PASSWORD:-InternalMySQL_Root_2026!}
+    volumes:
+      - nexpanel-mysql-data:/var/lib/mysql
+    networks:
+      - sites
+
+  # 4. External MySQL 8.4 Engine (Simulated existing external Docker)
+  external-mysql:
+    image: mysql:8.4
+    container_name: external-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${EXTERNAL_MYSQL_ROOT_PASSWORD:-ExtMySQL_Root_2026!}
+    volumes:
+      - external-mysql-data:/var/lib/mysql
+    networks:
+      - sites
+
+  # 5. External MariaDB 12.3 Engine (Simulated external MariaDB)
+  external-mariadb:
+    image: mariadb:11.4 # LTS stable baseline compatible with 11/12
+    container_name: external-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-MariaDB_Root_2026!}
+    volumes:
+      - external-mariadb-data:/var/lib/mysql
+    networks:
+      - sites
+
+  # 6. External PostgreSQL 16 Engine (Simulated external Postgres for sites)
+  external-postgres:
+    image: postgres:16-alpine
+    container_name: external-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: site_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${EXTERNAL_POSTGRES_PASSWORD:-ExtPostgres_Root_2026!}
+    volumes:
+      - external-postgres-data:/var/lib/postgresql/data
+    networks:
+      - sites
+
+  # 7. Mock CloudPanel 2.5.4 Host (for Live-SSH Import testing FR-IMP-01c)
+  mock-cloudpanel:
+    image: alpine:latest
+    container_name: mock-cloudpanel
+    restart: unless-stopped
+    command: >
+      sh -c "
+        apk add --no-cache openssh-server bash gzip mysql-client sudo &&
+        ssh-keygen -A &&
+        mkdir -p /home/examplecom/htdocs/example.com /home/examplecom/conf/nginx /etc/cron.d /var/run/sshd &&
+        echo 'examplecom:x:1001:1001:CloudPanel User:/home/examplecom:/bin/bash' >> /etc/passwd &&
+        echo 'root:cloudpanel_root_2026!' | chpasswd &&
+        echo -e '#!/bin/bash\nif [ \"\$$1\" == \"db:export\" ]; then echo \"Dumping database...\"; echo \"Database exported to /tmp/\$$2.sql.gz\"; fi' > /usr/local/bin/clpctl &&
+        chmod +x /usr/local/bin/clpctl &&
+        echo 'server { server_name example.com; root /home/examplecom/htdocs/example.com; fastcgi_pass php8.2-fpm; }' > /home/examplecom/conf/nginx/example.com.conf &&
+        echo '<?php echo \"Mock CloudPanel Site\";' > /home/examplecom/htdocs/example.com/index.php &&
+        echo '0 3 * * * examplecom /usr/local/bin/clpctl db:backup' > /etc/cron.d/clp &&
+        /usr/sbin/sshd -D -p 2222
+      "
+    ports:
+      - "127.0.0.1:2222:2222"
+    networks:
+      - panel
+
+networks:
+  proxy:
+    name: proxy
+    external: true
+  panel:
+    name: nexpanel-panel
+  sites:
+    name: nexpanel-sites
+
+volumes:
+  npm-data:
+  npm-letsencrypt:
+  nexpanel-db-data:
+  nexpanel-mysql-data:
+  external-mysql-data:
+  external-mariadb-data:
+  external-postgres-data:

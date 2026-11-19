@@ -1,0 +1,112 @@
+# NexPanel — REFERENCE docker-compose (NOT production-ready)
+# See docs/03-ARCHITECTURE.md §3.3 and docs/08-DEPLOYMENT-OPERATIONS.md §8.3
+# Placeholders only — never commit real passwords here.
+# Create the external network once:  docker network create proxy
+# Then:  docker compose --env-file .env up -d
+
+services:
+  # --- External reverse proxy (owns 80/443) -------------------------
+  npm:
+    image: jc21/nginx-proxy-manager:2.16.0
+    container_name: npm
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      # Admin UI loopback-only by default — use an SSH tunnel or an NPM
+      # proxy host with an access list to reach it (see docs/03 §3.3.4).
+      - "127.0.0.1:81:81"
+    volumes:
+      - ./data/npm/data:/data
+      - ./data/npm/letsencrypt:/etc/letsencrypt
+    networks:
+      - proxy
+
+  # --- Panel: metadata DB (PostgreSQL, panel only — never a site DB) --
+  nexpanel-db:
+    image: postgres:16-alpine
+    container_name: nexpanel-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PANEL_DB_NAME:-nexpanel}
+      POSTGRES_USER: ${PANEL_DB_USER:-nexpanel}
+      POSTGRES_PASSWORD: ${PANEL_DB_PASSWORD:-CHANGE_ME_IN_.env}
+    volumes:
+      - nexpanel-db-data:/var/lib/postgresql/data
+    networks:
+      - panel
+    # No published ports — only the panel reaches this DB.
+
+  # --- Panel: internal MySQL (toggleable — see docs/03 §3.4.4) --------
+  # This is ONE engine. The panel can manage more (MariaDB/Postgres),
+  # or none — sites can use external-docker / external-remote engines.
+  nexpanel-mysql:
+    image: mysql:8.4
+    container_name: nexpanel-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${INTERNAL_MYSQL_ROOT_PASSWORD:-CHANGE_ME_IN_.env}
+    volumes:
+      - nexpanel-mysql-data:/var/lib/mysql
+    networks:
+      - sites
+    # No published ports — sites reach it via the `sites` network only.
+    # Disable it in Admin -> Database Engines to stop this container
+    # (data volume is kept). Profiles are a build-time choice; the
+    # panel's enable/disable toggle is the runtime control.
+    profiles:
+      - internal-mysql
+
+  # --- Panel: web (UI + REST API) ------------------------------------
+  nexpanel-web:
+    image: nexpanel/web:1.0.0
+    container_name: nexpanel-web
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data/panel:/data/panel
+      - ./data/sites:/data/sites
+    networks:
+      - proxy
+      - panel
+      - sites
+    # No published ports — reached via NPM proxy host (panel.example.com).
+    # For first setup only, you may temporarily add "127.0.0.1:8443:8443"
+    # and use an SSH tunnel. Remove it once the NPM host exists.
+    depends_on:
+      - nexpanel-db
+
+  # --- Panel: worker (background jobs) -------------------------------
+  nexpanel-worker:
+    image: nexpanel/worker:1.0.0
+    container_name: nexpanel-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data/panel:/data/panel
+      - ./data/sites:/data/sites
+      # Docker socket access MUST be scoped via a socket proxy in
+      # production (see docs/06 §6.4 / docs/09 §9.4). Direct mount
+      # below is for local reference only — do not ship it as-is.
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - panel
+      - sites
+      - proxy
+    depends_on:
+      - nexpanel-db
+
+networks:
+  proxy:
+    name: proxy
+    external: true
+  panel:
+    name: nexpanel-panel
+  sites:
+    name: nexpanel-sites
+
+volumes:
+  nexpanel-db-data:
+  nexpanel-mysql-data:

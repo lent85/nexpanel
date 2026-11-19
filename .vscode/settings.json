@@ -1,0 +1,19 @@
+{
+  "typescript.tsdk": "backend/node_modules/typescript/lib",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.organizeImports": "explicit"
+  },
+  "files.exclude": {
+    "**/.git": true,
+    "**/.DS_Store": true,
+    "**/node_modules": true,
+    "**/dist": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/data/panel/vault.key": true,
+    "**/.codegraph/db": true
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Backend: Dev Server",
+      "cwd": "${workspaceFolder}/backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Backend: Run Tests",
+      "cwd": "${workspaceFolder}/backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["test"],
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "CLI: Run Tests",
+      "cwd": "${workspaceFolder}/cli",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["test"],
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Fixtures: Generate",
+      "cwd": "${workspaceFolder}/backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "fixtures:generate"],
+      "console": "integratedTerminal"
+    }
+  ]
+}

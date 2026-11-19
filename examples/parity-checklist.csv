@@ -1,0 +1,45 @@
+id,area,feature,cloudpanel_status,nexpanel_mvp,priority,acceptance_ref
+FR-SITE-01,Sites,"6 site types, per-site isolation",Has it,Yes,M,02 §2.1
+FR-SITE-02,Sites,WordPress 1-click install,Has it,Yes,M,02 §2.1
+FR-SITE-03,Sites,PHP 7.1-8.5 per-site switch,Has it,Yes,M,02 §2.1
+FR-SITE-04,Sites,Node.js 16-24 sites,Has it,Yes,M,02 §2.1
+FR-SITE-05,Sites,Python 3.12 sites,Has it,Yes,M,02 §2.1
+FR-SITE-06,Sites,Static HTML sites,Has it,Yes,M,02 §2.1
+FR-SITE-07,Sites,Reverse proxy sites,Has it,Yes,M,02 §2.1
+FR-SITE-08,Sites,Docker-app sites,No,v1.1,S,02 §2.1
+FR-SITE-09,Sites,Git deploy + rollback,No,v1.1,S,02 §2.1
+FR-SITE-13,Sites,Staging clone + push-live,No,v1.1,S,02 §2.1
+FR-PROXY-01,Proxy (NPM),Connect external NPM via API,No - internal Nginx only,Yes,M,02 §2.2
+FR-PROXY-02,Proxy (NPM),Shared external Docker network proxy,No,Yes,M,02 §2.2
+FR-PROXY-03,Proxy (NPM),Proxy-host lifecycle via NPM API,No,Yes,M,02 §2.2
+FR-PROXY-05,Proxy (NPM),SSL via NPM: LE HTTP-01/DNS-01/wildcard/custom,Has it (own LE),Yes - via NPM,M,02 §2.2
+FR-PROXY-06,Proxy (NPM),Access lists (basic auth + IP),Has it (Basic Auth),Yes,M,02 §2.2
+FR-PROXY-07,Proxy (NPM),NPM-down queue + drift reconcile,No,Yes,M,02 §2.2
+FR-DB-01,Databases,Engine registry MySQL/MariaDB/PostgreSQL,MySQL OR MariaDB locked at install,Yes,M,02 §2.3
+FR-DB-02,Databases,Engine modes internal-docker/external-docker/external-remote,Internal only (+ remote add),Yes,M,02 §2.3
+FR-DB-03,Databases,Create DB+user in one form,Has it,Yes,M,02 §2.3
+FR-DB-05,Databases,phpMyAdmin SSO,Has it,Yes,M,02 §2.3
+FR-DB-06,Databases,Import/export SQL,Has it,Yes,M,02 §2.3
+FR-DB-07,Databases,Nightly dumps 03:15 7-day retention,Has it,Yes,M,02 §2.3
+FR-DB-09,Databases,Engine migration wizard,No,v1.1,S,02 §2.3
+FR-DB-11,Databases,Redis per-site,Has it,Yes,M,02 §2.3
+FR-FILE-01,Files,Web file manager,Has it,Yes,M,02 §2.4
+FR-FILE-02,Files,SFTP/SSH users per site,Has it,Yes,M,02 §2.4
+FR-PHP-01,PHP,Per-site PHP settings,Has it,Yes,M,02 §2.5
+FR-PHP-02,PHP,Vhost editor + nginx -t gate,Has it,Yes,M,02 §2.5
+FR-PHP-03,PHP,Varnish per site,Has it,Yes,M,02 §2.5
+FR-CRON-01,Cron/Logs,Per-site cron,Has it,Yes,M,02 §2.6
+FR-LOG-01,Cron/Logs,Logs in panel (Nginx/PHP/app/NPM),Has it,Yes,M,02 §2.6
+FR-SVC-01,Cron/Logs,Services page,Has it,Yes,M,02 §2.6
+FR-SEC-01,Security,2FA + lockout,Has it,Yes,M,02 §2.7
+FR-SEC-03,Security,UFW firewall UI,Has it,Yes,M,02 §2.7
+FR-SEC-04,Security,"IP/bot block, Cloudflare-only",Has it,Yes,M,02 §2.7
+FR-SEC-06,Security,Roles Admin/Site Manager/User,Has it,Yes + Client read-only,M,02 §2.7
+FR-BKP-01,Backups,Remote backups via rclone (S3/Wasabi/DO/Dropbox/GDrive/Hetzner/SFTP),Has it,Yes,M,02 §2.8
+FR-BKP-02,Backups,One-click restore in UI,No - manual tar+clpctl,Yes,M,02 §2.8
+FR-USR-03,Users/API,REST API v1 + OpenAPI,No public API,Yes,M,02 §2.9
+FR-USR-04,Users/API,CLI nxctl (clpctl superset),Has clpctl,Yes,M,02 §2.9
+FR-IMP-01,Import,CloudPanel import sources (backup.tar/local/live SSH),No importer,Yes,02 §2.10 / 05
+FR-IMP-02,Import,Import wizard + dry-run,No,Yes,M,02 §2.10 / 05
+FR-IMP-03,Import,Import fidelity files+DB+vhost+cron+SSL,Manual only,Yes,M,02 §2.10 / 05
+FR-IMP-04,Import,Rollback + idempotency,No,Yes,M,02 §2.10 / 05

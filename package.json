@@ -1,0 +1,22 @@
+{
+  "name": "nexpanel-root",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NexPanel — Docker-native server control panel",
+  "scripts": {
+    "install:all": "npm --prefix backend install && npm --prefix cli install && npm --prefix frontend install",
+    "build": "npm --prefix backend run build && npm --prefix cli run build",
+    "test": "npm --prefix backend test && npm --prefix cli test",
+    "test:backend": "npm --prefix backend test",
+    "test:cli": "npm --prefix cli test",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix cli run typecheck",
+    "fixtures:generate": "npm --prefix backend run fixtures:generate",
+    "codegraph:sync": "codegraph sync",
+    "codegraph:status": "codegraph status",
+    "lab:up": "docker compose -f docker/lab-compose.yml up -d",
+    "lab:down": "docker compose -f docker/lab-compose.yml down"
+  },
+  "license": "Apache-2.0"
+}

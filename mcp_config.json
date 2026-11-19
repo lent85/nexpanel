@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "codegraph": {
+      "command": "codegraph",
+      "args": ["serve", "--mcp"],
+      "description": "CodeGraph semantic intelligence: call paths, symbol discovery, impact analysis and verbatim code context."
+    },
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://nexpanel:nexpanel_secret@localhost:5432/nexpanel"
+      ],
+      "description": "PostgreSQL metadata store inspector: inspect tables, schema migrations, and queries for NexPanel metadata DB."
+    },
+    "docker": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-docker"
+      ],
+      "description": "Docker container & network inspector: inspect NPM proxy, database engines, PHP-FPM containers, and Docker networks."
+    }
+  }
+}

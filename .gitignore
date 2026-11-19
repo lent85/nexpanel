@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# NexPanel Runtime Data & Vault Keys (Never commit sensitive keys or sites)
+backend/data/panel/vault.key
+backend/data/sites/
+backend/data/backups/
+backend/data/imports/
+backend/htdocs/
+cli/temp/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor & OS files
+.DS_Store
+Thumbs.db
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
