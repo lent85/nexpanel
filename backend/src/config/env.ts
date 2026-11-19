@@ -4,6 +4,14 @@ import * as path from 'node:path';
 
 dotenv.config();
 
+// Auto-detect test runner execution (e.g. node --test or vitest)
+if (!process.env.NODE_ENV && (process.argv.some((a) => a.includes('test')) || process.execArgv.some((a) => a.includes('test')))) {
+  process.env.NODE_ENV = 'test';
+  if (process.env.PANEL_DB_USE_MEMORY === undefined) {
+    process.env.PANEL_DB_USE_MEMORY = 'true';
+  }
+}
+
 const booleanFromString = z.preprocess((val) => {
   if (typeof val === 'string') {
     const lower = val.trim().toLowerCase();

@@ -2,6 +2,7 @@ import { buildApp } from './app.js';
 import { getEnv } from './config/env.js';
 import { getDb } from './db/index.js';
 import { brand } from './config/brand.js';
+import { ProxyQueue } from './edge/proxy-queue.js';
 
 async function start() {
   const env = getEnv();
@@ -14,6 +15,9 @@ async function start() {
   } catch (err: any) {
     console.warn('Database migration warning:', err.message);
   }
+
+  // Start background proxy queue auto-drain reconciler (FR-PROXY-07)
+  ProxyQueue.startAutoDrain(30000);
 
   const app = await buildApp();
 

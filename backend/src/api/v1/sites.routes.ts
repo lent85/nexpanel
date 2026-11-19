@@ -74,6 +74,12 @@ export async function sitesRoutes(fastify: FastifyInstance): Promise<void> {
     const res = await db.query<Site>(sql, params);
     let rows = res.rows;
 
+    // Multi-user RBAC: user and client roles only see assigned/owned sites
+    if (request.authContext && (request.authContext.role === 'user' || request.authContext.role === 'client')) {
+      const allowedIds = new Set(request.authContext.assignedSiteIds || []);
+      rows = rows.filter((r) => allowedIds.has(r.id));
+    }
+
     if (query.search) {
       const q = query.search.toLowerCase();
       rows = rows.filter((r) => r.domain.toLowerCase().includes(q));

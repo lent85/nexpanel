@@ -8,6 +8,9 @@ import { VhostManager } from './vhost-manager.js';
 import { PhpManager } from './php-manager.js';
 import { WordPressScaffolder, WordPressInstallParams } from './wordpress-scaffolder.js';
 import { AuditService } from '../audit/audit.js';
+import { ContainerRunner } from './container-runner.js';
+import { NpmEdgeProvider } from '../edge/npm-provider.js';
+import { ProxyQueue } from '../edge/proxy-queue.js';
 
 export interface CreateSiteInput {
   domain: string;
@@ -139,12 +142,90 @@ export class SiteService {
       fs.writeFileSync(phpIniPath, PhpManager.renderPhpIni());
     }
 
+    // 4. Start origin container
+    const originRes = await ContainerRunner.startSiteOrigin({
+      id,
+      domain,
+      aliases: input.aliases || [],
+      type: input.type,
+      status: 'provisioning',
+      phpVersion,
+      nodeVersion: input.nodeVersion,
+      pythonVersion: input.pythonVersion,
+      documentRoot: docRoot,
+      siteUserUid: 1001,
+      volumePath: paths.siteRoot,
+      originContainerName,
+      originPort,
+      dbEngineId: input.dbEngineId,
+      varnishEnabled: Boolean(input.varnishEnabled),
+      redisEnabled: Boolean(input.redisEnabled),
+      maintenanceMode: false,
+      tags: input.tags || [],
+      notes: input.notes,
+      ownerUserId: input.ownerUserId,
+      hostId: 'host-1',
+      createdAt: now,
+      updatedAt: now
+    });
+
+    // 5. Register proxy host with NPM (FR-PROXY-01, R1)
+    let edgeHostId: number | null = null;
+    let proxyStatus: 'in_sync' | 'drifted' = 'in_sync';
+
+    try {
+      const provider = await NpmEdgeProvider.getDefault();
+      const check = await provider.verifyConnection();
+      if (check.ok) {
+        const proxyRes = await provider.createHost({
+          domainNames: [domain, ...(input.aliases || [])],
+          forwardScheme: 'http',
+          forwardHost: originContainerName,
+          forwardPort: originPort,
+          http2Support: true,
+          websocketSupport: true,
+          enabled: true
+        });
+        edgeHostId = proxyRes.edgeId;
+      } else {
+        proxyStatus = 'drifted';
+        ProxyQueue.enqueue({
+          action: 'create',
+          payload: {
+            domainNames: [domain, ...(input.aliases || [])],
+            forwardScheme: 'http',
+            forwardHost: originContainerName,
+            forwardPort: originPort,
+            http2Support: true,
+            websocketSupport: true,
+            enabled: true
+          }
+        });
+      }
+    } catch {
+      proxyStatus = 'drifted';
+      ProxyQueue.enqueue({
+        action: 'create',
+        payload: {
+          domainNames: [domain, ...(input.aliases || [])],
+          forwardScheme: 'http',
+          forwardHost: originContainerName,
+          forwardPort: originPort,
+          http2Support: true,
+          websocketSupport: true,
+          enabled: true
+        }
+      });
+    }
+
+    const siteStatus: SiteStatus = originRes.started ? 'live' : 'provisioning';
+
     const site: Site = {
       id,
       domain,
       aliases: input.aliases || [],
       type: input.type,
-      status: 'live',
+      status: siteStatus,
       phpVersion,
       nodeVersion: input.nodeVersion,
       pythonVersion: input.pythonVersion,
@@ -194,6 +275,28 @@ export class SiteService {
         site.updatedAt
       ]
     );
+
+    // Save proxy host record (linking edge_host_id and drift status)
+    const proxyHostId = uuidv7();
+    try {
+      await db.execute(
+        `INSERT INTO proxy_hosts (id, site_id, domain_names, forward_scheme, forward_host, forward_port, edge_host_id, drift_status, enabled, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          proxyHostId,
+          site.id,
+          [domain, ...(input.aliases || [])],
+          'http',
+          originContainerName,
+          originPort,
+          edgeHostId,
+          proxyStatus,
+          true,
+          now,
+          now
+        ]
+      );
+    } catch {}
 
     await AuditService.log({
       actorUserId,
@@ -385,6 +488,11 @@ export class SiteService {
     }
 
     const site = res.rows[0];
+    if (site.originContainerName) {
+      try {
+        await ContainerRunner.stopSiteOrigin(site.originContainerName);
+      } catch {}
+    }
     const siteRoot = site.volumePath || SiteService.getSitePaths(SiteService.slugifyDomain(site.domain)).siteRoot;
     if (fs.existsSync(siteRoot)) {
       try {

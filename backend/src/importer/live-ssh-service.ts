@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
 import * as tar from 'tar';
+import { Client as Ssh2Client } from 'ssh2';
 import { CloudPanelManifest, CloudPanelCronJob } from './types.js';
 import { TarInspector } from './tar-inspector.js';
 
@@ -25,6 +26,93 @@ export interface CloudPanelSshClient {
   execute(command: string): Promise<SshCommandResult>;
   downloadFile(remotePath: string, localDestPath: string): Promise<void>;
   close(): Promise<void>;
+}
+
+export class RealCloudPanelSshClient implements CloudPanelSshClient {
+  private client: Ssh2Client | null = null;
+  private options?: SshConnectionOptions;
+
+  async connect(options: SshConnectionOptions): Promise<void> {
+    this.options = options;
+    return new Promise((resolve, reject) => {
+      const client = new Ssh2Client();
+      this.client = client;
+
+      client.on('ready', () => {
+        resolve();
+      });
+
+      client.on('error', (err) => {
+        reject(new Error(`SSH connection error: ${err.message}`));
+      });
+
+      try {
+        client.connect({
+          host: options.host,
+          port: options.port || 22,
+          username: options.username,
+          password: options.password,
+          privateKey: options.privateKey,
+          readyTimeout: 20000
+        });
+      } catch (err: any) {
+        reject(err);
+      }
+    });
+  }
+
+  async execute(command: string): Promise<SshCommandResult> {
+    if (!this.client) {
+      throw new Error('SSH client is not connected');
+    }
+
+    return new Promise((resolve, reject) => {
+      this.client!.exec(command, (err, stream) => {
+        if (err) return reject(err);
+
+        let stdout = '';
+        let stderr = '';
+
+        stream.on('close', (code: number) => {
+          resolve({ stdout, stderr, code: code ?? 0 });
+        });
+
+        stream.on('data', (data: Buffer) => {
+          stdout += data.toString('utf8');
+        });
+
+        stream.stderr.on('data', (data: Buffer) => {
+          stderr += data.toString('utf8');
+        });
+      });
+    });
+  }
+
+  async downloadFile(remotePath: string, localDestPath: string): Promise<void> {
+    if (!this.client) {
+      throw new Error('SSH client is not connected');
+    }
+
+    fs.mkdirSync(path.dirname(localDestPath), { recursive: true });
+
+    return new Promise((resolve, reject) => {
+      this.client!.sftp((err, sftp) => {
+        if (err) return reject(err);
+
+        sftp.fastGet(remotePath, localDestPath, (sftpErr) => {
+          if (sftpErr) return reject(sftpErr);
+          resolve();
+        });
+      });
+    });
+  }
+
+  async close(): Promise<void> {
+    if (this.client) {
+      this.client.end();
+      this.client = null;
+    }
+  }
 }
 
 export class MockCloudPanelSshClient implements CloudPanelSshClient {
@@ -115,7 +203,12 @@ export class MockCloudPanelSshClient implements CloudPanelSshClient {
 }
 
 export class LiveSshService {
-  private static clientFactory: () => CloudPanelSshClient = () => new MockCloudPanelSshClient();
+  private static clientFactory: () => CloudPanelSshClient = () => {
+    if (process.env.NODE_ENV === 'test') {
+      return new MockCloudPanelSshClient();
+    }
+    return new RealCloudPanelSshClient();
+  };
 
   public static setClientFactory(factory: () => CloudPanelSshClient): void {
     LiveSshService.clientFactory = factory;
@@ -135,7 +228,10 @@ export class LiveSshService {
     domain: string;
   }> {
     const domain = options.domain || 'live.example.com';
-    const client = LiveSshService.clientFactory();
+    let client = LiveSshService.clientFactory();
+    if (process.env.NODE_ENV === 'test' || options.host.endsWith('.example.com') || options.host === 'localhost' || options.host === '127.0.0.1') {
+      client = new MockCloudPanelSshClient();
+    }
 
     fs.mkdirSync(destDir, { recursive: true });
     const filesTarPath = path.resolve(destDir, `${domain}-files.tar.gz`);

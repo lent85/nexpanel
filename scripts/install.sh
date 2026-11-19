@@ -368,6 +368,39 @@ print_summary() {
   echo
 }
 
+start_services() {
+  log "Starting NexPanel stack with Docker Compose..."
+  cd "${INSTALL_DIR}"
+  if docker compose version >/dev/null 2>&1; then
+    docker compose up -d
+  elif command -v docker-compose >/dev/null 2>&1; then
+    docker-compose up -d
+  else
+    warn "Neither 'docker compose' nor 'docker-compose' found. Please run 'docker compose up -d' manually in ${INSTALL_DIR}."
+    return 0
+  fi
+
+  log "Waiting for NexPanel services to be healthy..."
+  local attempts=0
+  local max_attempts=30
+  local healthy=false
+
+  while [ $attempts -lt $max_attempts ]; do
+    if curl -skf "http://127.0.0.1:8443/health/live" >/dev/null 2>&1 || curl -skf "http://127.0.0.1:3000/health/live" >/dev/null 2>&1; then
+      healthy=true
+      break
+    fi
+    attempts=$((attempts + 1))
+    sleep 2
+  done
+
+  if [ "$healthy" = true ]; then
+    success "NexPanel stack is running and healthy."
+  else
+    warn "NexPanel container is starting in background. Check 'docker compose ps' in ${INSTALL_DIR}."
+  fi
+}
+
 main() {
   banner
   check_root
@@ -379,6 +412,7 @@ main() {
   setup_network
   setup_environment_and_vault
   setup_compose_file
+  start_services
   install_cli_symlink
   print_summary
 }

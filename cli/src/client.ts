@@ -18,7 +18,7 @@ export class NxctlClient {
   }
 
   private getConfigPath(): string {
-    return path.resolve(os.homedir(), '.nxctl.json');
+    return process.env.NXCTL_CONFIG_PATH || path.resolve(os.homedir(), '.nxctl.json');
   }
 
   private loadConfig(): Record<string, string> {
@@ -34,9 +34,13 @@ export class NxctlClient {
   }
 
   public saveConfig(config: Record<string, string>): void {
-    const cfgPath = this.getConfigPath();
-    const existing = this.loadConfig();
-    fs.writeFileSync(cfgPath, JSON.stringify({ ...existing, ...config }, null, 2), { mode: 0o600 });
+    try {
+      const cfgPath = this.getConfigPath();
+      const existing = this.loadConfig();
+      fs.writeFileSync(cfgPath, JSON.stringify({ ...existing, ...config }, null, 2), { mode: 0o600 });
+    } catch {
+      // Fallback gracefully if homedir or file is not writable (e.g. CI or Windows EPERM)
+    }
   }
 
   public setToken(token: string): void {

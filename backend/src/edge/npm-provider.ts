@@ -17,6 +17,17 @@ export class NpmEdgeProvider implements EdgeProvider {
     this.client = client;
   }
 
+  public static async getDefault(): Promise<NpmEdgeProvider> {
+    const { getEnv } = await import('../config/env.js');
+    const env = getEnv();
+    const client = new NpmClient({
+      baseUrl: env.NPM_BASE_URL,
+      adminEmail: env.NPM_ADMIN_EMAIL,
+      adminPassword: env.NPM_ADMIN_PASSWORD
+    });
+    return new NpmEdgeProvider(client);
+  }
+
   public static validateForwardHost(host: string): void {
     const trimmed = host.trim().toLowerCase();
     if (trimmed === 'localhost' || trimmed === '127.0.0.1' || trimmed === '::1' || trimmed.startsWith('127.')) {

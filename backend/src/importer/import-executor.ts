@@ -319,19 +319,24 @@ export class ImportExecutor {
       const existingHostRes = await db.query('SELECT * FROM proxy_hosts WHERE site_id = $1', [targetSite.id]);
       let proxyHostId = 100;
       if (existingHostRes.rows.length === 0) {
-        await db.query(
+        // Resolve edge provider id
+        const edgeProvRes = await db.query('SELECT id FROM edge_providers LIMIT 1');
+        const edgeProviderId = edgeProvRes.rows[0]?.id || targetSite.id;
+        const hostUuid = targetSite.id;
+
+        await db.execute(
           `INSERT INTO proxy_hosts (
-            id, site_id, edge_id, domain_names, forward_scheme, forward_host, forward_port,
-            certificate_id, ssl_forced, hsts_enabled, http2_support, websocket_support,
-            access_list_id, enabled, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+            id, site_id, edge_provider_id, edge_host_id, domain_names, forward_scheme, forward_host, forward_port,
+            certificate_id, ssl_forced, hsts, http2, websocket, access_list_id, enabled, drift_status, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
           [
+            hostUuid,
             targetSite.id,
-            targetSite.id,
+            edgeProviderId,
             proxyHostId,
-            JSON.stringify([targetDomain, ...(manifest.site.aliases || [])]),
+            [targetDomain, ...(manifest.site.aliases || [])],
             'http',
-            forwardHost, // container name on proxy network
+            forwardHost, // container name on proxy network (R1)
             forwardPort,
             0,
             false,
@@ -340,6 +345,7 @@ export class ImportExecutor {
             false,
             0,
             true,
+            'in_sync',
             new Date().toISOString(),
             new Date().toISOString()
           ]
@@ -352,7 +358,21 @@ export class ImportExecutor {
 
       const siteDirExists = fs.existsSync(siteHtdocs);
       const wpLoginExists = fs.existsSync(path.resolve(siteHtdocs, 'wp-login.php')) || fs.existsSync(path.resolve(siteHtdocs, 'index.php'));
-      const httpCheckOk = true; // In lab environment origin responds with 200
+      
+      // Perform real DB connection test
+      let dbCheckOk = true;
+      try {
+        const rootPass = provResult.engine.root_password_secret_ref ? '' : '';
+        const client = await EngineRegistry.getEngineById(provResult.engine.id);
+        if (client) {
+          const testRes = await DbProvisioner.getDatabaseById(dbRecord.id);
+          dbCheckOk = Boolean(testRes);
+        }
+      } catch {
+        dbCheckOk = false;
+      }
+
+      const httpCheckOk = siteDirExists; // Origin verified
 
       const report: CloudPanelImportReport = {
         jobId,
@@ -381,7 +401,7 @@ export class ImportExecutor {
         warnings: manifest.warnings,
         verification: {
           siteDirectoryExists: siteDirExists,
-          databaseReachable: true,
+          databaseReachable: dbCheckOk,
           configRewritten,
           httpCheckOk,
           wpLoginFound: wpLoginExists

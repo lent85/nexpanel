@@ -40,9 +40,14 @@ function getMemoryState(engineId: string) {
 }
 
 export class MySqlEngineClient implements DbEngineClient {
+  private isOffline = false;
+
   constructor(protected engine: DbEngine, protected rootPassword: string) {}
 
   private async getConnection(database?: string): Promise<mysql.Connection | null> {
+    if (this.isOffline || process.env.NODE_ENV === 'test' || process.env.PANEL_DB_USE_MEMORY === 'true') {
+      return null;
+    }
     try {
       const conn = await mysql.createConnection({
         host: this.engine.host,
@@ -50,11 +55,12 @@ export class MySqlEngineClient implements DbEngineClient {
         user: this.engine.root_username || 'root',
         password: this.rootPassword,
         database,
-        connectTimeout: 2000,
+        connectTimeout: 500,
         multipleStatements: true
       });
       return conn;
     } catch {
+      this.isOffline = true;
       return null;
     }
   }
@@ -248,9 +254,14 @@ SET FOREIGN_KEY_CHECKS=1;
 }
 
 export class PostgreSqlEngineClient implements DbEngineClient {
+  private isOffline = false;
+
   constructor(protected engine: DbEngine, protected rootPassword: string) {}
 
   private async getClient(database = 'postgres'): Promise<pkg.Client | null> {
+    if (this.isOffline || process.env.NODE_ENV === 'test' || process.env.PANEL_DB_USE_MEMORY === 'true') {
+      return null;
+    }
     try {
       const client = new PgClient({
         host: this.engine.host,
@@ -258,11 +269,12 @@ export class PostgreSqlEngineClient implements DbEngineClient {
         user: this.engine.root_username || 'postgres',
         password: this.rootPassword,
         database,
-        connectionTimeoutMillis: 2000
+        connectionTimeoutMillis: 500
       });
       await client.connect();
       return client;
     } catch {
+      this.isOffline = true;
       return null;
     }
   }

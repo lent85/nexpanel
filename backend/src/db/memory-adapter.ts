@@ -29,7 +29,9 @@ export class MemoryAdapter implements DatabaseAdapter {
       'sessions',
       'login_attempts',
       'firewall_rules',
-      'site_security_rules'
+      'site_security_rules',
+      'site_assignments',
+      'proxy_mutation_queue'
     ];
     this.tables.clear();
     for (const t of tableNames) {

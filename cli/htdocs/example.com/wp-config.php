@@ -11,14 +11,14 @@ define( 'DB_HOST', 'nexpanel-mysql' );
 define( 'DB_CHARSET', 'utf8mb4' );
 define( 'DB_COLLATE', '' );
 
-define('AUTH_KEY', 'dQ+oFQG/l2SEvs9rJBl6bxDEWpk5Gtm7JzbiY1c9Fak=');
-define('SECURE_AUTH_KEY', 'Ozq77A1X8R0G/wY2EFtYvF8KkZcoWqUy/uGB1qrBNiE=');
-define('LOGGED_IN_KEY', 'cC4dJwxRvZ/nYHYGkEbXhO43WQlFt/aRQuFQp+5JO/c=');
-define('NONCE_KEY', 'wx5RdIMgikIrLhg7qSGzJciOHuKjCgf8ooV8mIPHMe8=');
-define('AUTH_SALT', 'pYbnArXXRsiasFe8tXiAL0jlc0wDFQ9ZIhl81ckhnvA=');
-define('SECURE_AUTH_SALT', '02e4/vBsf2+skk9VtccVE6iEmsCfVvzsiAwlX/6VEuU=');
-define('LOGGED_IN_SALT', 'eCBGmQMnq4Ln7mXu+lau6XUrz+9usfnYpXZYj97FbHA=');
-define('NONCE_SALT', 'IGOocQnpzaYly7ZVFr5AgX8H+WFqFJuNBvJZkN9znbc=');
+define('AUTH_KEY', 'yv9qC7Wu8eAotKFSOzNs10kR65DG1AY1mw/+gii/rSk=');
+define('SECURE_AUTH_KEY', 'URBo4Pm2POfRW/5kR2fwgp5KAP2dPxbP9XwSwArtzRI=');
+define('LOGGED_IN_KEY', '3q7MWx4xS68mrzSqlF9uOQQKcdKD+veH6Y7ShSxW8lw=');
+define('NONCE_KEY', 'HGBs8hKBMJLm/J7GKAlH/H4DrL4o5ieiK6AQHn7x17s=');
+define('AUTH_SALT', 'DwaxDuuwnQ4CrxPcNA0T1PSTFK2JjwtTt4izsVTsToM=');
+define('SECURE_AUTH_SALT', '3a+Ode07Vht3eULMCRJHkNKevgL6HJ/r3TQX5yj6kdc=');
+define('LOGGED_IN_SALT', 'B6NYxLJq6xVBD3CuO3Yc0AeMie3jxEYQaW0l68Mk164=');
+define('NONCE_SALT', '8NniQ+B0R/frdBoMopbFpcCiBM63TJ1nC23y/c0Swjw=');
 
 $table_prefix = 'wp_';
 
