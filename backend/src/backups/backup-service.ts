@@ -8,6 +8,7 @@ import { SiteService } from '../sites/site-service.js';
 import { DumpService } from '../db-engines/dump-service.js';
 import { BackupRun, BackupSchedule } from './types.js';
 import { DestinationManager } from './destination-manager.js';
+import { VaultService } from '../vault/vault.js';
 
 export interface SiteBackupResult {
   snapshotId: string;
@@ -65,6 +66,7 @@ export class BackupService {
 
     // 2. Database Dumps
     const dbDumps: string[] = [];
+    const databaseEntries: Array<{ id: string; name: string; dumpFile: string }> = [];
     if (includeDb) {
       const db = getDb();
       const siteDbs = await db.query('SELECT id, name FROM databases WHERE site_id = $1 AND deleted_at IS NULL', [
@@ -79,6 +81,11 @@ export class BackupService {
           actorIp
         );
         dbDumps.push(dumpRes.filename);
+        databaseEntries.push({
+          id: d.id,
+          name: d.name,
+          dumpFile: dumpRes.filename
+        });
       }
     }
 
@@ -92,7 +99,8 @@ export class BackupService {
       phpVersion: site.phpVersion,
       createdAt: new Date().toISOString(),
       includesFiles: filesArchived,
-      dbDumps
+      dbDumps,
+      databases: databaseEntries
     };
 
     fs.writeFileSync(path.resolve(stagingDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
@@ -118,7 +126,22 @@ export class BackupService {
     if (options.destinationId) {
       const dest = await DestinationManager.getDestinationById(options.destinationId);
       if (dest) {
-        // Upload simulated or executed
+        let destConfig: any = {};
+        try {
+          destConfig = JSON.parse(VaultService.decrypt(dest.config_secret_ref));
+        } catch {}
+
+        if (destConfig.path) {
+          const remoteDir = path.resolve(destConfig.path);
+          if (!fs.existsSync(remoteDir)) {
+            fs.mkdirSync(remoteDir, { recursive: true });
+          }
+          fs.copyFileSync(finalArchive, path.resolve(remoteDir, `${snapshotId}.tar.gz`));
+        } else {
+          const remoteTargetDir = path.resolve(process.cwd(), 'data/remote_backups', dest.name);
+          fs.mkdirSync(remoteTargetDir, { recursive: true });
+          fs.copyFileSync(finalArchive, path.resolve(remoteTargetDir, `${snapshotId}.tar.gz`));
+        }
       }
     }
 

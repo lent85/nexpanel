@@ -9,6 +9,7 @@ import { VhostManager } from '../src/sites/vhost-manager.js';
 import { CronService } from '../src/cron/cron-service.js';
 import { LogService } from '../src/logs/log-service.js';
 import { SiteService } from '../src/sites/site-service.js';
+import { EngineRegistry } from '../src/db-engines/engine-registry.js';
 
 describe('Milestone 4 Sites Runtime Lifecycle (FR-SITE-01 to 07, 10-12, 14)', () => {
   let app: any;
@@ -17,6 +18,7 @@ describe('Milestone 4 Sites Runtime Lifecycle (FR-SITE-01 to 07, 10-12, 14)', ()
   beforeEach(async () => {
     const memoryDb = new MemoryAdapter();
     setDb(memoryDb);
+    await EngineRegistry.initDefaultEngines();
 
     // Ensure clean sites data directory for each test run
     const testSitesDir = path.resolve(process.cwd(), 'data/sites');

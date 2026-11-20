@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
   language VARCHAR(16) NOT NULL DEFAULT 'en',
   totp_enabled BOOLEAN NOT NULL DEFAULT FALSE,
   totp_secret_ref TEXT,
+  recovery_codes_hash TEXT,
   last_login_at TIMESTAMPTZ,
   last_login_ip VARCHAR(64),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

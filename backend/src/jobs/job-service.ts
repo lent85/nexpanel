@@ -120,6 +120,24 @@ export class JobService {
     };
   }
 
+  public static async waitForJob(jobId: string, timeoutMs = 60000, pollIntervalMs = 25): Promise<Job> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const job = await JobService.get(jobId);
+      if (!job) {
+        throw new Error(`Job '${jobId}' not found`);
+      }
+      if (job.status === 'done') {
+        return job;
+      }
+      if (job.status === 'failed') {
+        throw new Error(`Job '${jobId}' failed: ${job.errorMessage || 'Unknown error'}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+    throw new Error(`Timeout waiting for job '${jobId}' after ${timeoutMs}ms`);
+  }
+
   public static getLogs(job: Job): string {
     if (job.logPath && fs.existsSync(job.logPath)) {
       return fs.readFileSync(job.logPath, 'utf8');

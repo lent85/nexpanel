@@ -26,11 +26,11 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   try {
     const payload = JwtService.verify(token);
 
-    if (payload.type !== 'access') {
+    if (payload.type !== 'access' || payload.scopes?.includes('2fa:verify')) {
       reply.status(401).send({
         error: {
           code: 'UNAUTHORIZED',
-          message: 'Invalid token type: expected access token'
+          message: 'Invalid token: access token required. 2FA challenge tokens are restricted.'
         }
       });
       return;
@@ -82,14 +82,70 @@ export function requirePermission(action: PermissionAction) {
       return;
     }
 
-    const siteId = (request.params as any)?.siteId || (request.params as any)?.id;
-    if (!RbacService.can(request.authContext, action, siteId)) {
+    const db = getDb();
+    const params = (request.params || {}) as any;
+    const body = (request.body || {}) as any;
+    const query = (request.query || {}) as any;
+
+    let targetSiteId: string | undefined = params?.siteId;
+
+    // Resolve resource IDs to targetSiteId
+    if (!targetSiteId && params?.id) {
+      const url = request.url;
+      if (url.includes('/api/v1/sites')) {
+        targetSiteId = params.id;
+      } else if (url.includes('/api/v1/databases')) {
+        const dbRes = await db.query('SELECT site_id FROM databases WHERE id = $1 AND deleted_at IS NULL', [params.id]);
+        if (dbRes.rows.length === 0) {
+          reply.status(404).send({ error: { code: 'NOT_FOUND', message: `Database '${params.id}' not found` } });
+          return;
+        }
+        targetSiteId = (dbRes.rows[0] as any)?.site_id;
+      } else if (url.includes('/api/v1/cron')) {
+        const cronRes = await db.query('SELECT site_id FROM cron_jobs WHERE id = $1', [params.id]);
+        if (cronRes.rows.length === 0) {
+          reply.status(404).send({ error: { code: 'NOT_FOUND', message: `Cron job '${params.id}' not found` } });
+          return;
+        }
+        targetSiteId = (cronRes.rows[0] as any)?.site_id;
+      } else if (url.includes('/api/v1/backups')) {
+        const bkpRes = await db.query('SELECT site_id FROM backups WHERE id = $1', [params.id]);
+        if (bkpRes.rows.length === 0) {
+          reply.status(404).send({ error: { code: 'NOT_FOUND', message: `Backup '${params.id}' not found` } });
+          return;
+        }
+        targetSiteId = (bkpRes.rows[0] as any)?.site_id;
+      } else if (url.includes('/api/v1/jobs')) {
+        const jobRes = await db.query('SELECT site_id FROM jobs WHERE id = $1', [params.id]);
+        if (jobRes.rows.length > 0) {
+          targetSiteId = (jobRes.rows[0] as any)?.site_id;
+        }
+      }
+    }
+
+    // Explicit siteId in body or query: enforce site authorization
+    const explicitSiteId = body?.siteId || query?.siteId;
+    if (explicitSiteId && (request.authContext.role === 'user' || request.authContext.role === 'client')) {
+      if (!request.authContext.assignedSiteIds?.includes(explicitSiteId)) {
+        reply.status(403).send({
+          error: {
+            code: 'FORBIDDEN',
+            message: `User is not authorized for site '${explicitSiteId}'`
+          }
+        });
+        return;
+      }
+      if (!targetSiteId) targetSiteId = explicitSiteId;
+    }
+
+    if (!RbacService.can(request.authContext, action, targetSiteId)) {
       reply.status(403).send({
         error: {
           code: 'FORBIDDEN',
           message: `Role '${request.authContext.role}' lacks permission '${action}'`
         }
       });
+      return;
     }
   };
 }

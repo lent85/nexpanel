@@ -228,6 +228,37 @@ export class MemoryAdapter implements DatabaseAdapter {
       return getRowVal(col) === val;
     }
 
+    // col = 'literal'
+    const eqLitMatch = trimmed.match(/(\w+)\s*=\s*'([^']*)'/i);
+    if (eqLitMatch) {
+      const [, col, val] = eqLitMatch;
+      return getRowVal(col) === val;
+    }
+
+    // col != $param
+    const neMatch = trimmed.match(/(\w+)\s*!=\s*\$(\d+)/i);
+    if (neMatch) {
+      const [, col, paramIdx] = neMatch;
+      const val = params[parseInt(paramIdx, 10) - 1];
+      return getRowVal(col) !== val;
+    }
+
+    // col IN (...)
+    const inMatch = trimmed.match(/(\w+)\s+IN\s*\(([^)]+)\)/i);
+    if (inMatch) {
+      const [, col, inList] = inMatch;
+      const items = inList.split(',').map((s) => s.trim());
+      const rowVal = String(getRowVal(col));
+      return items.some((item) => {
+        if (item.startsWith('$')) {
+          const pIdx = parseInt(item.substring(1), 10) - 1;
+          return String(params[pIdx]) === rowVal;
+        }
+        const stripped = item.replace(/^['"]|['"]$/g, '');
+        return stripped === rowVal;
+      });
+    }
+
     // col IS NULL
     const isNullMatch = trimmed.match(/(\w+)\s+IS\s+NULL/i);
     if (isNullMatch) {

@@ -1,7 +1,7 @@
 <?php
 define('DB_NAME', 'wp_example');
 define('DB_USER', 'wp_example_user');
-define('DB_PASSWORD', '5VD5#INHYT^RxTehtIAZY8+J');
+define('DB_PASSWORD', '93RUcRHFU!cRZRCt-6+EV9!a');
 define('DB_HOST', 'nexpanel-mysql');
 define('DB_CHARSET', 'utf8mb4');
 define('DB_COLLATE', '');

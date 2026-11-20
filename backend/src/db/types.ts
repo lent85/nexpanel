@@ -14,6 +14,7 @@ export interface User {
   language: string;
   totpEnabled: boolean;
   totpSecretRef?: string;
+  recoveryCodesHash?: string[];
   lastLoginAt?: string;
   lastLoginIp?: string;
   createdAt: string;

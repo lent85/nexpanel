@@ -98,6 +98,20 @@ export class RbacService {
       if (!ctx.assignedSiteIds || !ctx.assignedSiteIds.includes(siteId)) {
         return false;
       }
+    } else {
+      // If action is site-bound and no valid siteId is specified, user/client cannot execute mutating actions
+      const siteBoundActions: PermissionAction[] = [
+        'sites:edit',
+        'sites:delete',
+        'db:create',
+        'db:delete',
+        'db:edit',
+        'backup:restore',
+        'backup:create'
+      ];
+      if (siteBoundActions.includes(action)) {
+        return false;
+      }
     }
 
     return true;

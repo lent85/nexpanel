@@ -6,19 +6,19 @@
 
 define( 'DB_NAME', 'wp_example_com' );
 define( 'DB_USER', 'u_example_com' );
-define( 'DB_PASSWORD', '' );
+define( 'DB_PASSWORD', 'WpPassword!2026' );
 define( 'DB_HOST', 'nexpanel-mysql' );
 define( 'DB_CHARSET', 'utf8mb4' );
 define( 'DB_COLLATE', '' );
 
-define('AUTH_KEY', 'cuPzZg3e/QsTdnD/7NjJhNQTELjtQBaQfg4TY7JdRcw=');
-define('SECURE_AUTH_KEY', 'FN1wqb2R50dRYCDB/hcOEZZgN6ZSw1xV+BH03y3hpzs=');
-define('LOGGED_IN_KEY', 'vhjrLhRiMKf4B2WpgBLUF5H2n5HR3Vx2N5/4ZTohRO8=');
-define('NONCE_KEY', 'nR/0apWalfRD+oBBZpgSMlhY5TojmuTJpPyLmSlTf2c=');
-define('AUTH_SALT', 'OjW+b983Z2eMzEWIZK8askGJECUwY/FlmBuRolOCU/8=');
-define('SECURE_AUTH_SALT', 'FXsNzFv2aVTqSkavLVEpZRg/d4+v4AQrRR9pQTg54NU=');
-define('LOGGED_IN_SALT', '5QI8eUVBiS2k17uYMMd52ulrSeOlT3717R5yGdWtG8M=');
-define('NONCE_SALT', 'OuswtZFlUpvNz2LecLTuBrk/EeufQwsX2LzbPtz+naI=');
+define('AUTH_KEY', 'WWTul83V83vObMvg/EYTRIuAPtDNaO5S0rZb7rzuRbU=');
+define('SECURE_AUTH_KEY', 'BEp1cjCpHgjSysOv7ZG4iRMmzeRgzxIvRo6S/de5idw=');
+define('LOGGED_IN_KEY', 'nq0K5fJ/6x09tHs0myleR9gpH4W6HklEf6ReDhAhASg=');
+define('NONCE_KEY', 'J7WtWewnXSFA2gXwk+HOVCkMnPWjRPGXXwu2PMVGwmw=');
+define('AUTH_SALT', 'mC+UMd1aGrvLw1IVyM6SIWnL7igHcKTxuUw7tHMWEGk=');
+define('SECURE_AUTH_SALT', '7aaZFEycOtqpcOwx4T6K0XmXHvxr3s1EOo4Avxvewfo=');
+define('LOGGED_IN_SALT', '754A+NzMb+Hc8mD7pMhmMHRH6nTJF09gUEspmShTLOQ=');
+define('NONCE_SALT', 'GXapuZJ5zW1MG5hoR8/ypAXpiFEK28JDuvTKLWqYu3k=');
 
 $table_prefix = 'wp_';
 

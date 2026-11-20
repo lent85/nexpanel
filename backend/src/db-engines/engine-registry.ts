@@ -69,6 +69,12 @@ export class EngineRegistry {
     if (anyEngine.rows.length > 0) {
       return anyEngine.rows[0];
     }
+    // Auto-initialize default engine if table is empty
+    await this.initDefaultEngines();
+    const fallback = await db.query<DbEngine>('SELECT * FROM db_engines WHERE is_default = TRUE LIMIT 1');
+    if (fallback.rows.length > 0) {
+      return fallback.rows[0];
+    }
     throw new Error('No database engine registered');
   }
 
@@ -80,6 +86,15 @@ export class EngineRegistry {
     actorUserId?: string,
     actorIp?: string
   ): Promise<DbEngine> {
+    // Hard Rule R2 Guard: Panel metadata DB ('nexpanel-db') can NEVER be registered as a site engine
+    const isPanelDbContainer = input.containerName === 'nexpanel-db' || input.externalContainerName === 'nexpanel-db';
+    const isPanelDbHost = input.host && (input.host === 'nexpanel-db' || (input.type === 'postgres' && input.host.includes('nexpanel-db')));
+    if (isPanelDbContainer || isPanelDbHost) {
+      const err = new Error("Cannot register panel metadata database ('nexpanel-db') as a site engine (Violates Hard Rule R2)");
+      (err as any).statusCode = 400;
+      throw err;
+    }
+
     const db = getDb();
     const id = randomUUID();
     const secretRef = VaultService.encrypt(input.rootPassword);

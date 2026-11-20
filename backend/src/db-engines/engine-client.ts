@@ -40,29 +40,26 @@ function getMemoryState(engineId: string) {
 }
 
 export class MySqlEngineClient implements DbEngineClient {
-  private isOffline = false;
-
   constructor(protected engine: DbEngine, protected rootPassword: string) {}
 
+  private isTestOrMemory(): boolean {
+    return process.env.NODE_ENV === 'test' || process.env.PANEL_DB_USE_MEMORY === 'true';
+  }
+
   private async getConnection(database?: string): Promise<mysql.Connection | null> {
-    if (this.isOffline || process.env.NODE_ENV === 'test' || process.env.PANEL_DB_USE_MEMORY === 'true') {
+    if (this.isTestOrMemory()) {
       return null;
     }
-    try {
-      const conn = await mysql.createConnection({
-        host: this.engine.host,
-        port: this.engine.port || 3306,
-        user: this.engine.root_username || 'root',
-        password: this.rootPassword,
-        database,
-        connectTimeout: 500,
-        multipleStatements: true
-      });
-      return conn;
-    } catch {
-      this.isOffline = true;
-      return null;
-    }
+    const conn = await mysql.createConnection({
+      host: this.engine.host,
+      port: this.engine.port || 3306,
+      user: this.engine.root_username || 'root',
+      password: this.rootPassword,
+      database,
+      connectTimeout: 5000,
+      multipleStatements: true
+    });
+    return conn;
   }
 
   async testConnection(): Promise<TestConnectionResult> {
@@ -71,28 +68,32 @@ export class MySqlEngineClient implements DbEngineClient {
       return { ok: false, latencyMs: 1, error: `Engine '${this.engine.name}' is currently disabled` };
     }
 
-    const conn = await this.getConnection();
-    if (conn) {
+    if (this.isTestOrMemory()) {
+      return {
+        ok: true,
+        latencyMs: Math.max(1, Date.now() - start),
+        version: `${this.engine.type} ${this.engine.version}`
+      };
+    }
+
+    try {
+      const conn = await this.getConnection();
+      if (!conn) {
+        return { ok: false, latencyMs: Date.now() - start, error: 'Could not establish MySQL connection' };
+      }
       try {
         const [rows]: [any, any] = await conn.query('SELECT VERSION() AS version');
-        await conn.end();
         return {
           ok: true,
           latencyMs: Math.max(1, Date.now() - start),
           version: rows[0]?.version || `${this.engine.type} ${this.engine.version}`
         };
-      } catch (err: any) {
+      } finally {
         await conn.end();
-        return { ok: false, latencyMs: Date.now() - start, error: err.message };
       }
+    } catch (err: any) {
+      return { ok: false, latencyMs: Date.now() - start, error: err.message };
     }
-
-    // Fallback in mock/test mode
-    return {
-      ok: true,
-      latencyMs: Math.max(1, Date.now() - start),
-      version: `${this.engine.type} ${this.engine.version}`
-    };
   }
 
   async createDatabase(name: string, charset = 'utf8mb4', collation = 'utf8mb4_unicode_ci'): Promise<void> {
@@ -238,12 +239,18 @@ SET FOREIGN_KEY_CHECKS=1;
     if (conn) {
       try {
         await conn.query('SET FOREIGN_KEY_CHECKS=0');
+        const errors: string[] = [];
         for (const stmt of statements) {
           try {
             await conn.query(stmt);
-          } catch {}
+          } catch (err: any) {
+            errors.push(`Statement failed: ${stmt.slice(0, 50)}... Reason: ${err.message}`);
+          }
         }
         await conn.query('SET FOREIGN_KEY_CHECKS=1');
+        if (errors.length > 0) {
+          throw new Error(`MySQL import failed with ${errors.length} error(s): ${errors.slice(0, 3).join('; ')}`);
+        }
       } finally {
         await conn.end();
       }
@@ -254,29 +261,26 @@ SET FOREIGN_KEY_CHECKS=1;
 }
 
 export class PostgreSqlEngineClient implements DbEngineClient {
-  private isOffline = false;
-
   constructor(protected engine: DbEngine, protected rootPassword: string) {}
 
+  private isTestOrMemory(): boolean {
+    return process.env.NODE_ENV === 'test' || process.env.PANEL_DB_USE_MEMORY === 'true';
+  }
+
   private async getClient(database = 'postgres'): Promise<pkg.Client | null> {
-    if (this.isOffline || process.env.NODE_ENV === 'test' || process.env.PANEL_DB_USE_MEMORY === 'true') {
+    if (this.isTestOrMemory()) {
       return null;
     }
-    try {
-      const client = new PgClient({
-        host: this.engine.host,
-        port: this.engine.port || 5432,
-        user: this.engine.root_username || 'postgres',
-        password: this.rootPassword,
-        database,
-        connectionTimeoutMillis: 500
-      });
-      await client.connect();
-      return client;
-    } catch {
-      this.isOffline = true;
-      return null;
-    }
+    const client = new PgClient({
+      host: this.engine.host,
+      port: this.engine.port || 5432,
+      user: this.engine.root_username || 'postgres',
+      password: this.rootPassword,
+      database,
+      connectionTimeoutMillis: 5000
+    });
+    await client.connect();
+    return client;
   }
 
   async testConnection(): Promise<TestConnectionResult> {
@@ -285,27 +289,32 @@ export class PostgreSqlEngineClient implements DbEngineClient {
       return { ok: false, latencyMs: 1, error: `Engine '${this.engine.name}' is currently disabled` };
     }
 
-    const client = await this.getClient();
-    if (client) {
+    if (this.isTestOrMemory()) {
+      return {
+        ok: true,
+        latencyMs: Math.max(1, Date.now() - start),
+        version: `${this.engine.type} ${this.engine.version}`
+      };
+    }
+
+    try {
+      const client = await this.getClient();
+      if (!client) {
+        return { ok: false, latencyMs: Date.now() - start, error: 'Could not establish PostgreSQL connection' };
+      }
       try {
         const res = await client.query('SELECT version()');
-        await client.end();
         return {
           ok: true,
           latencyMs: Math.max(1, Date.now() - start),
           version: res.rows[0]?.version || `${this.engine.type} ${this.engine.version}`
         };
-      } catch (err: any) {
+      } finally {
         await client.end();
-        return { ok: false, latencyMs: Date.now() - start, error: err.message };
       }
+    } catch (err: any) {
+      return { ok: false, latencyMs: Date.now() - start, error: err.message };
     }
-
-    return {
-      ok: true,
-      latencyMs: Math.max(1, Date.now() - start),
-      version: `${this.engine.type} ${this.engine.version}`
-    };
   }
 
   async createDatabase(name: string): Promise<void> {
@@ -313,7 +322,7 @@ export class PostgreSqlEngineClient implements DbEngineClient {
     if (client) {
       try {
         await client.query(`CREATE DATABASE "${name}"`);
-      } catch {} finally {
+      } finally {
         await client.end();
       }
     }
@@ -325,7 +334,7 @@ export class PostgreSqlEngineClient implements DbEngineClient {
     if (client) {
       try {
         await client.query(`DROP DATABASE IF EXISTS "${name}"`);
-      } catch {} finally {
+      } finally {
         await client.end();
       }
     }
@@ -344,7 +353,7 @@ export class PostgreSqlEngineClient implements DbEngineClient {
       try {
         await client.query(`CREATE ROLE "${username}" WITH LOGIN PASSWORD '${password}'`);
         await client.query(`GRANT ALL PRIVILEGES ON DATABASE "${dbName}" TO "${username}"`);
-      } catch {} finally {
+      } finally {
         await client.end();
       }
     }
@@ -361,7 +370,7 @@ export class PostgreSqlEngineClient implements DbEngineClient {
     if (client) {
       try {
         await client.query(`DROP ROLE IF EXISTS "${username}"`);
-      } catch {} finally {
+      } finally {
         await client.end();
       }
     }
@@ -373,14 +382,60 @@ export class PostgreSqlEngineClient implements DbEngineClient {
     if (client) {
       try {
         await client.query(`ALTER ROLE "${username}" WITH PASSWORD '${newPassword}'`);
-      } catch {} finally {
+      } finally {
         await client.end();
       }
     }
   }
 
   async exportDatabase(dbName: string): Promise<string> {
-    return `-- NexPanel PostgreSQL Dump for ${dbName}\n-- Date: ${new Date().toISOString()}\nCREATE TABLE IF NOT EXISTS items (id SERIAL PRIMARY KEY, name VARCHAR(255));\nINSERT INTO items (name) VALUES ('demo');\n`;
+    const client = await this.getClient(dbName);
+    const dumpLines: string[] = [
+      `-- NexPanel PostgreSQL Dump for ${dbName}`,
+      `-- Engine: ${this.engine.name} (${this.engine.type} ${this.engine.version})`,
+      `-- Date: ${new Date().toISOString()}`,
+      `SET statement_timeout = 0;\n`
+    ];
+
+    if (client) {
+      try {
+        const tablesRes = await client.query(
+          "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+        );
+        for (const row of tablesRes.rows) {
+          const tableName = row.table_name;
+          dumpLines.push(`DROP TABLE IF EXISTS "${tableName}" CASCADE;`);
+
+          const colRes = await client.query(
+            "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position",
+            [tableName]
+          );
+          const colDefs = colRes.rows.map((c: any) => {
+            let def = `"${c.column_name}" ${c.data_type.toUpperCase()}`;
+            if (c.column_default) def += ` DEFAULT ${c.column_default}`;
+            if (c.is_nullable === 'NO') def += ' NOT NULL';
+            return def;
+          });
+          dumpLines.push(`CREATE TABLE "${tableName}" (\n  ${colDefs.join(',\n  ')}\n);`);
+
+          const dataRes = await client.query(`SELECT * FROM "${tableName}"`);
+          for (const dataRow of dataRes.rows) {
+            const cols = Object.keys(dataRow);
+            const vals = Object.values(dataRow).map((v) =>
+              v === null ? 'NULL' : `'${String(v).replace(/'/g, "''")}'`
+            );
+            dumpLines.push(`INSERT INTO "${tableName}" ("${cols.join('", "')}") VALUES (${vals.join(', ')});`);
+          }
+        }
+        return dumpLines.join('\n');
+      } finally {
+        await client.end();
+      }
+    }
+
+    // Fallback dump for test/memory mode
+    dumpLines.push(`CREATE TABLE IF NOT EXISTS items (id SERIAL PRIMARY KEY, name VARCHAR(255));\nINSERT INTO items (name) VALUES ('demo');`);
+    return dumpLines.join('\n');
   }
 
   async importDatabase(dbName: string, sqlContent: string): Promise<{ statementsExecuted: number }> {
@@ -392,10 +447,16 @@ export class PostgreSqlEngineClient implements DbEngineClient {
     const client = await this.getClient(dbName);
     if (client) {
       try {
+        const errors: string[] = [];
         for (const stmt of statements) {
           try {
             await client.query(stmt);
-          } catch {}
+          } catch (err: any) {
+            errors.push(`Statement failed: ${stmt.slice(0, 50)}... Reason: ${err.message}`);
+          }
+        }
+        if (errors.length > 0) {
+          throw new Error(`PostgreSQL import failed with ${errors.length} error(s): ${errors.slice(0, 3).join('; ')}`);
         }
       } finally {
         await client.end();

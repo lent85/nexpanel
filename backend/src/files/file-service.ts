@@ -12,14 +12,51 @@ export interface FileItem {
 
 export class FileService {
   public static sanitizePath(baseDir: string, relativePath: string): string {
-    const safeRelative = relativePath.replace(/^(\.\.(\/|\\|$))+/, '');
-    const resolved = path.resolve(baseDir, safeRelative);
+    const normalizedBase = path.resolve(baseDir);
+    const resolved = path.resolve(normalizedBase, relativePath);
 
-    if (!resolved.startsWith(path.resolve(baseDir))) {
+    // 1. Lexical boundary check: relative path must not escape baseDir
+    const rel = path.relative(normalizedBase, resolved);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
       const err = new Error('Path traversal detected: Access denied');
       (err as any).statusCode = 403;
       throw err;
     }
+
+    // Sibling directory check: ensures /var/www/site1 does not match /var/www/site1-secret
+    const baseWithSep = normalizedBase.endsWith(path.sep) ? normalizedBase : normalizedBase + path.sep;
+    if (resolved !== normalizedBase && !resolved.startsWith(baseWithSep)) {
+      const err = new Error('Path traversal detected: Access denied');
+      (err as any).statusCode = 403;
+      throw err;
+    }
+
+    // 2. Symlink escape check
+    const realBase = fs.existsSync(normalizedBase) ? fs.realpathSync(normalizedBase) : normalizedBase;
+    const realBaseWithSep = realBase.endsWith(path.sep) ? realBase : realBase + path.sep;
+
+    if (fs.existsSync(resolved)) {
+      const realResolved = fs.realpathSync(resolved);
+      if (realResolved !== realBase && !realResolved.startsWith(realBaseWithSep)) {
+        const err = new Error('Path traversal detected: Symlink escape denied');
+        (err as any).statusCode = 403;
+        throw err;
+      }
+    } else {
+      let curr = path.dirname(resolved);
+      while (!fs.existsSync(curr) && curr !== path.dirname(curr)) {
+        curr = path.dirname(curr);
+      }
+      if (fs.existsSync(curr)) {
+        const realParent = fs.realpathSync(curr);
+        if (realParent !== realBase && !realParent.startsWith(realBaseWithSep)) {
+          const err = new Error('Path traversal detected: Symlink escape denied');
+          (err as any).statusCode = 403;
+          throw err;
+        }
+      }
+    }
+
     return resolved;
   }
 

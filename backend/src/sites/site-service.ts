@@ -11,6 +11,8 @@ import { AuditService } from '../audit/audit.js';
 import { ContainerRunner } from './container-runner.js';
 import { NpmEdgeProvider } from '../edge/npm-provider.js';
 import { ProxyQueue } from '../edge/proxy-queue.js';
+import { DbProvisioner } from '../db-engines/db-provisioner.js';
+import { getDbEngineClient } from '../db-engines/engine-client.js';
 
 export interface CreateSiteInput {
   domain: string;
@@ -87,16 +89,92 @@ export class SiteService {
     const originPort = input.type === 'reverse_proxy' ? 0 : 8080;
     const docRoot = input.documentRoot || paths.htdocs;
 
+    // Allocate isolated UID for host file permissions
+    const maxUidRes = await db.query('SELECT max(site_user_uid) as max_uid FROM sites');
+    const allocatedUid = Math.max(1001, (parseInt((maxUidRes.rows[0] as any)?.max_uid, 10) || 1000) + 1);
+
     // Origin container names per docs/03 §3.5
     const originContainerName = `site-${slug}-web`;
 
+    // Insert site record early so child entities (site_databases, proxy_hosts) satisfy PostgreSQL foreign keys
+    await db.execute(
+      `INSERT INTO sites (id, domain, aliases, type, status, php_version, node_version, python_version, document_root, site_user_uid, volume_path, origin_container_name, origin_port, db_engine_id, varnish_enabled, redis_enabled, maintenance_mode, tags, notes, owner_user_id, host_id, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
+      [
+        id,
+        domain,
+        input.aliases || [],
+        input.type,
+        'provisioning',
+        phpVersion || null,
+        input.nodeVersion || null,
+        input.pythonVersion || null,
+        docRoot,
+        allocatedUid,
+        paths.siteRoot,
+        originContainerName,
+        originPort,
+        input.dbEngineId || null,
+        Boolean(input.varnishEnabled),
+        Boolean(input.redisEnabled),
+        false,
+        input.tags || [],
+        input.notes || null,
+        input.ownerUserId || null,
+        'host-1',
+        now,
+        now
+      ]
+    );
+
     // 1. Scaffold files based on type
+    let dbEngineId = input.dbEngineId;
     if (input.type === 'wordpress') {
       const wp = input.wordpress || {
         siteTitle: 'My WordPress Site',
         adminUsername: 'admin',
         adminEmail: 'admin@' + domain
       };
+      const wpDbName = wp.dbName || `wp_${slug.replace(/-/g, '_').substring(0, 16)}`;
+      const wpDbUser = wp.dbUser || `u_${slug.replace(/-/g, '_').substring(0, 14)}`;
+      const wpDbPassword = wp.dbPassword || 'WpPassword!2026';
+
+      try {
+        const provRes = await DbProvisioner.createDatabaseAndUser(
+          {
+            siteId: id,
+            engineId: input.dbEngineId,
+            name: wpDbName,
+            user: {
+              username: wpDbUser,
+              password: wpDbPassword,
+              host: '%',
+              privileges: 'read_write'
+            }
+          },
+          input.ownerUserId
+        );
+        dbEngineId = provRes.engine.id;
+
+        const installSql = WordPressScaffolder.getInstallSql({
+          documentRoot: docRoot,
+          domain,
+          siteTitle: wp.siteTitle,
+          adminUsername: wp.adminUsername,
+          adminPassword: wp.adminPassword || 'AdminPassword123!',
+          adminEmail: wp.adminEmail,
+          dbName: wpDbName,
+          dbUser: wpDbUser,
+          dbPassword: wpDbPassword,
+          dbHost: provRes.engine.mode === 'internal-docker' ? 'nexpanel-mysql' : provRes.engine.host
+        });
+        const client = getDbEngineClient(provRes.engine, provRes.user.plainPassword || '');
+        await client.importDatabase(wpDbName, installSql);
+      } catch (err) {
+        await db.execute('DELETE FROM sites WHERE id = $1', [id]);
+        throw new Error(`WordPress database initialization failed: ${(err as any).message}`);
+      }
+
       WordPressScaffolder.scaffold({
         documentRoot: docRoot,
         domain,
@@ -104,10 +182,10 @@ export class SiteService {
         adminUsername: wp.adminUsername,
         adminPassword: wp.adminPassword,
         adminEmail: wp.adminEmail,
-        dbName: wp.dbName || `wp_${slug.replace(/-/g, '_').substring(0, 16)}`,
-        dbUser: wp.dbUser || `u_${slug.replace(/-/g, '_').substring(0, 14)}`,
-        dbPassword: wp.dbPassword,
-        dbHost: wp.dbHost || 'nexpanel-mysql'
+        dbName: wpDbName,
+        dbUser: wpDbUser,
+        dbPassword: wpDbPassword,
+        dbHost: 'nexpanel-mysql'
       });
     } else if (input.type === 'php') {
       const indexPhp = `<?php\nphpinfo();\n`;
@@ -116,7 +194,7 @@ export class SiteService {
       const indexHtml = `<!DOCTYPE html><html><head><title>${domain}</title></head><body><h1>Welcome to ${domain}</h1><p>Served by NexPanel.</p></body></html>`;
       fs.writeFileSync(path.resolve(docRoot, 'index.html'), indexHtml);
     } else if (input.type === 'nodejs') {
-      const serverJs = `const http = require('http');\nconst server = http.createServer((req, res) => { res.end('Node.js app running on NexPanel'); });\nserver.listen(3000);`;
+      const serverJs = `const http = require('http');\nconst port = process.env.PORT || 8080;\nconst server = http.createServer((req, res) => { res.end('Node.js app running on NexPanel'); });\nserver.listen(port);`;
       fs.writeFileSync(path.resolve(docRoot, 'server.js'), serverJs);
     } else if (input.type === 'python') {
       const appPy = `def application(environ, start_response):\n    start_response('200 OK', [('Content-Type', 'text/html')])\n    return [b'Python WSGI app running on NexPanel']\n`;
@@ -153,11 +231,11 @@ export class SiteService {
       nodeVersion: input.nodeVersion,
       pythonVersion: input.pythonVersion,
       documentRoot: docRoot,
-      siteUserUid: 1001,
+      siteUserUid: allocatedUid,
       volumePath: paths.siteRoot,
       originContainerName,
       originPort,
-      dbEngineId: input.dbEngineId,
+      dbEngineId,
       varnishEnabled: Boolean(input.varnishEnabled),
       redisEnabled: Boolean(input.redisEnabled),
       maintenanceMode: false,
@@ -173,6 +251,17 @@ export class SiteService {
     let edgeHostId: number | null = null;
     let proxyStatus: 'in_sync' | 'drifted' = 'in_sync';
 
+    let forwardHost = originContainerName;
+    let forwardPort = originPort;
+
+    if (input.type === 'reverse_proxy' && input.reverseProxy?.upstreamUrl) {
+      try {
+        const parsedUrl = new URL(input.reverseProxy.upstreamUrl);
+        forwardHost = parsedUrl.hostname;
+        forwardPort = parseInt(parsedUrl.port, 10) || (parsedUrl.protocol === 'https:' ? 443 : 80);
+      } catch {}
+    }
+
     try {
       const provider = await NpmEdgeProvider.getDefault();
       const check = await provider.verifyConnection();
@@ -180,8 +269,8 @@ export class SiteService {
         const proxyRes = await provider.createHost({
           domainNames: [domain, ...(input.aliases || [])],
           forwardScheme: 'http',
-          forwardHost: originContainerName,
-          forwardPort: originPort,
+          forwardHost,
+          forwardPort,
           http2Support: true,
           websocketSupport: true,
           enabled: true
@@ -194,8 +283,8 @@ export class SiteService {
           payload: {
             domainNames: [domain, ...(input.aliases || [])],
             forwardScheme: 'http',
-            forwardHost: originContainerName,
-            forwardPort: originPort,
+            forwardHost,
+            forwardPort,
             http2Support: true,
             websocketSupport: true,
             enabled: true
@@ -209,8 +298,8 @@ export class SiteService {
         payload: {
           domainNames: [domain, ...(input.aliases || [])],
           forwardScheme: 'http',
-          forwardHost: originContainerName,
-          forwardPort: originPort,
+          forwardHost,
+          forwardPort,
           http2Support: true,
           websocketSupport: true,
           enabled: true
@@ -230,11 +319,11 @@ export class SiteService {
       nodeVersion: input.nodeVersion,
       pythonVersion: input.pythonVersion,
       documentRoot: docRoot,
-      siteUserUid: 1001,
+      siteUserUid: allocatedUid,
       volumePath: paths.siteRoot,
       originContainerName,
       originPort,
-      dbEngineId: input.dbEngineId,
+      dbEngineId,
       varnishEnabled: Boolean(input.varnishEnabled),
       redisEnabled: Boolean(input.redisEnabled),
       maintenanceMode: false,
@@ -247,33 +336,8 @@ export class SiteService {
     };
 
     await db.execute(
-      `INSERT INTO sites (id, domain, aliases, type, status, php_version, node_version, python_version, document_root, site_user_uid, volume_path, origin_container_name, origin_port, db_engine_id, varnish_enabled, redis_enabled, maintenance_mode, tags, notes, owner_user_id, host_id, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
-      [
-        site.id,
-        site.domain,
-        site.aliases,
-        site.type,
-        site.status,
-        site.phpVersion || null,
-        site.nodeVersion || null,
-        site.pythonVersion || null,
-        site.documentRoot,
-        site.siteUserUid,
-        site.volumePath,
-        site.originContainerName,
-        site.originPort,
-        site.dbEngineId || null,
-        site.varnishEnabled,
-        site.redisEnabled,
-        site.maintenanceMode,
-        site.tags,
-        site.notes || null,
-        site.ownerUserId || null,
-        site.hostId,
-        site.createdAt,
-        site.updatedAt
-      ]
+      `UPDATE sites SET status = $1, db_engine_id = $2, updated_at = $3 WHERE id = $4`,
+      [site.status, site.dbEngineId || null, site.updatedAt, site.id]
     );
 
     // Save proxy host record (linking edge_host_id and drift status)

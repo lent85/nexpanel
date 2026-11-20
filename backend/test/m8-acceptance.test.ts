@@ -33,25 +33,47 @@ describe('Milestone 8: Final Acceptance & Operations Verification (docs/09 §9.3
     assert.strictEqual(upgradeContent.includes('rollback()'), true);
   });
 
-  it('Criterion 7: Parity checklist is 100% covered for MVP scope', () => {
+  it('Criterion 7: Parity checklist is 100% covered for MVP scope with executable tests', () => {
     const csvPath = path.resolve(rootDir, 'examples/parity-checklist.csv');
     assert.strictEqual(fs.existsSync(csvPath), true);
+
+    const matrixDocPath = path.resolve(rootDir, 'docs/REQUIREMENTS-EVIDENCE-MATRIX.md');
+    assert.strictEqual(fs.existsSync(matrixDocPath), true, 'docs/REQUIREMENTS-EVIDENCE-MATRIX.md must exist');
+    const matrixDocContent = fs.readFileSync(matrixDocPath, 'utf8');
+    assert.strictEqual(matrixDocContent.includes('DNS-01'), true);
+    assert.strictEqual(matrixDocContent.includes('Hard Rule R1'), true);
 
     const lines = fs.readFileSync(csvPath, 'utf8').trim().split('\n');
     const header = lines[0].split(',');
     const nexpanelIdx = header.indexOf('nexpanel_mvp');
     const priorityIdx = header.indexOf('priority');
+    const statusIdx = header.indexOf('status');
+    const testSuiteIdx = header.indexOf('test_suite');
+
+    assert.ok(statusIdx !== -1, 'status column must be present in parity-checklist.csv');
+    assert.ok(testSuiteIdx !== -1, 'test_suite column must be present in parity-checklist.csv');
 
     let mvpRowsCount = 0;
     for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].split(',');
       const mvpVal = cols[nexpanelIdx];
       const prio = cols[priorityIdx];
+      const status = cols[statusIdx];
+      const testSuite = cols[testSuiteIdx];
 
       if (prio === 'M') {
         mvpRowsCount++;
-        // Must be marked Yes or have MVP implementation
+        // Must be marked Yes and status must be 'implemented'
         assert.strictEqual(mvpVal.toLowerCase().includes('yes'), true);
+        assert.strictEqual(status, 'implemented', `Expected row ${cols[0]} to be implemented`);
+
+        // Test suite file must exist
+        assert.ok(testSuite && testSuite.length > 0, `Row ${cols[0]} must define a test_suite`);
+        const testFilePath = testSuite.startsWith('cli:')
+          ? path.resolve(rootDir, 'cli/test', testSuite.replace('cli:', ''))
+          : path.resolve(rootDir, 'backend/test', testSuite);
+
+        assert.strictEqual(fs.existsSync(testFilePath), true, `Test file ${testFilePath} for ${cols[0]} must exist`);
       }
     }
 

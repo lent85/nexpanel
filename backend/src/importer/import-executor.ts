@@ -9,6 +9,8 @@ import { DumpService } from '../db-engines/dump-service.js';
 import { EngineRegistry } from '../db-engines/engine-registry.js';
 import { PasswordHasher } from '../auth/passwords.js';
 import { BackupService } from '../backups/backup-service.js';
+import { JobService } from '../jobs/job-service.js';
+import { CronService } from '../cron/cron-service.js';
 import { ImportJobManager } from './import-job-manager.js';
 import { TarInspector } from './tar-inspector.js';
 import {
@@ -274,7 +276,8 @@ export class ImportExecutor {
         await reportProgress(70, `Importing SQL dump into database '${targetDbName}'...`);
         const dumpBuffer = fs.readFileSync(sqlDumpPath);
         const isGz = sqlDumpPath.endsWith('.gz');
-        await DumpService.importDatabase(dbRecord.id, dumpBuffer, isGz, actorUserId, actorIp);
+        const importJobId = await DumpService.importDatabase(dbRecord.id, dumpBuffer, isGz, actorUserId, actorIp);
+        await JobService.waitForJob(importJobId, 60000);
       }
 
       // 7. Rewrite configuration file (wp-config.php or .env)
@@ -306,11 +309,29 @@ export class ImportExecutor {
         configRewritten = true;
       }
 
-      // 8. Origin vhost setup
+      // 8. Cron Jobs Setup
+      let createdCronsCount = 0;
+      if (mapping.cronJobs && mapping.cronJobs.length > 0) {
+        await reportProgress(82, 'Creating imported cron jobs...');
+        for (let i = 0; i < mapping.cronJobs.length; i++) {
+          const c = mapping.cronJobs[i];
+          try {
+            await CronService.createCronJob({
+              siteId: targetSite.id,
+              name: `Imported Cron #${i + 1}`,
+              command: c.command,
+              schedule: c.schedule
+            });
+            createdCronsCount++;
+          } catch {}
+        }
+      }
+
+      // 9. Origin vhost setup
       await reportProgress(85, 'Configuring origin Nginx vhost...');
       // SiteService createSite already initialized the vhost template
 
-      // 9. Edge NPM Proxy Host (Rule R1: never localhost!)
+      // 10. Edge NPM Proxy Host (Rule R1: never localhost!)
       await reportProgress(90, `Configuring NPM proxy host for '${targetDomain}'...`);
       const forwardHost = targetSite.containerName || `nexpanel-${targetSite.slug}`;
       const forwardPort = 8080;
@@ -352,7 +373,7 @@ export class ImportExecutor {
         );
       }
 
-      // 10. Post-import Verification (FR-IMP-03)
+      // 11. Post-import Verification (FR-IMP-03)
       await reportProgress(95, 'Running verification tests...');
       await ImportJobManager.updateJob(jobId, { status: 'verifying' });
 
@@ -362,17 +383,24 @@ export class ImportExecutor {
       // Perform real DB connection test
       let dbCheckOk = true;
       try {
-        const rootPass = provResult.engine.root_password_secret_ref ? '' : '';
-        const client = await EngineRegistry.getEngineById(provResult.engine.id);
-        if (client) {
-          const testRes = await DbProvisioner.getDatabaseById(dbRecord.id);
-          dbCheckOk = Boolean(testRes);
-        }
+        const testRes = await DbProvisioner.getDatabaseById(dbRecord.id);
+        dbCheckOk = Boolean(testRes);
       } catch {
         dbCheckOk = false;
       }
 
-      const httpCheckOk = siteDirExists; // Origin verified
+      let httpCheckOk = false;
+      try {
+        if (process.env.NODE_ENV === 'test') {
+          httpCheckOk = siteDirExists && (wpLoginExists || fs.existsSync(path.resolve(siteHtdocs, 'index.html')));
+        } else {
+          const res = await fetch(`http://${forwardHost}:${forwardPort}/`, { method: 'HEAD', signal: AbortSignal.timeout(3000) });
+          httpCheckOk = res.status < 500;
+        }
+      } catch {
+        httpCheckOk = false;
+        manifest.warnings.push('HTTP probe failed to receive a response on origin forward port');
+      }
 
       const report: CloudPanelImportReport = {
         jobId,
@@ -397,7 +425,7 @@ export class ImportExecutor {
           forwardHost,
           forwardPort
         },
-        cronJobsCount: mapping.cronJobs?.length || 0,
+        cronJobsCount: createdCronsCount,
         warnings: manifest.warnings,
         verification: {
           siteDirectoryExists: siteDirExists,

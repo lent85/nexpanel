@@ -1,10 +1,12 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import * as crypto from 'node:crypto';
 import { AuthService } from '../../auth/auth-service.js';
 import { authenticate } from '../plugins/auth-guard.js';
 import { TotpService } from '../../auth/totp.js';
 import { getDb } from '../../db/index.js';
 import { AuditService } from '../../audit/audit.js';
+import { VaultService } from '../../vault/vault.js';
 
 const setupSchema = z.object({
   email: z.string().email(),
@@ -13,8 +15,9 @@ const setupSchema = z.object({
 });
 
 const loginSchema = z.object({
-  identifier: z.string().min(1),
-  password: z.string().min(1),
+  identifier: z.string().min(1).optional(),
+  password: z.string().min(1).optional(),
+  challengeToken: z.string().optional(),
   totpToken: z.string().optional(),
   recoveryCode: z.string().optional()
 });
@@ -107,7 +110,8 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/api/v1/auth/totp/verify', { preHandler: [authenticate] }, async (request, reply) => {
     const schema = z.object({
       secret: z.string().min(16),
-      token: z.string().length(6)
+      token: z.string().length(6),
+      recoveryCodes: z.array(z.string()).optional()
     });
     const body = schema.parse(request.body);
     const isValid = TotpService.verify(body.token, body.secret);
@@ -117,11 +121,24 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       return;
     }
 
+    const secretRef = VaultService.encrypt(body.secret);
+    let hashedCodes: string[] = [];
+    if (body.recoveryCodes && body.recoveryCodes.length > 0) {
+      hashedCodes = body.recoveryCodes.map((code) =>
+        crypto.createHash('sha256').update(code.trim().toUpperCase()).digest('hex')
+      );
+    } else {
+      for (let i = 0; i < 10; i++) {
+        const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+        hashedCodes.push(crypto.createHash('sha256').update(code).digest('hex'));
+      }
+    }
+
     const db = getDb();
     const now = new Date().toISOString();
     await db.execute(
-      'UPDATE users SET totp_enabled = TRUE, totp_secret_ref = $1, updated_at = $2 WHERE id = $3',
-      [body.secret, now, request.user!.sub]
+      'UPDATE users SET totp_enabled = TRUE, totp_secret_ref = $1, recovery_codes_hash = $2, updated_at = $3 WHERE id = $4',
+      [secretRef, JSON.stringify(hashedCodes), now, request.user!.sub]
     );
 
     await AuditService.log({

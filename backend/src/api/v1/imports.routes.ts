@@ -12,8 +12,11 @@ import { JobService } from '../../jobs/job-service.js';
 import { CloudPanelMapping } from '../../importer/types.js';
 
 const initiateImportSchema = z.object({
-  sourceType: z.enum(['backup_tar', 'local_tar_gz', 'live_ssh']),
+  sourceType: z.enum(['backup_tar', 'local_tar_gz', 'local_pair', 'live_ssh', 'ssh']),
   filePath: z.string().optional(),
+  archivePath: z.string().optional(),
+  localFilesTarGz: z.string().optional(),
+  localDbSqlGz: z.string().optional(),
   dbDumpFilePath: z.string().optional(),
   ssh: z
     .object({
@@ -46,88 +49,90 @@ const mappingSchema = z.object({
 });
 
 export async function importRoutes(fastify: FastifyInstance): Promise<void> {
-  // POST /api/v1/imports/cloudpanel
-  fastify.post(
-    '/cloudpanel',
-    { preHandler: [requirePermission('import:cloudpanel')] },
-    async (request, reply) => {
-      const body = initiateImportSchema.parse(request.body);
-      const user = (request as any).user;
+  const handleInitiateImport = async (request: any, reply: any) => {
+    const body = initiateImportSchema.parse(request.body);
+    const user = request.user;
 
-      let sourceRef = body.filePath || '';
+    const normSourceType: 'backup_tar' | 'local_tar_gz' | 'live_ssh' =
+      body.sourceType === 'ssh' ? 'live_ssh' : body.sourceType === 'local_pair' ? 'local_tar_gz' : body.sourceType;
+    let sourceRef = body.filePath || body.archivePath || body.localFilesTarGz || '';
+    const dbDumpFilePath = body.dbDumpFilePath || body.localDbSqlGz;
 
-      if (body.sourceType === 'live_ssh') {
-        if (!body.ssh) {
-          return reply.status(400).send({ error: 'SSH connection parameters are required for live_ssh source' });
-        }
-        const stagingDir = path.resolve(process.cwd(), 'data/imports/live-ssh-' + Date.now());
-        const pullResult = await LiveSshService.pullLiveSite(body.ssh, stagingDir);
-        sourceRef = pullResult.filesTarPath;
-
-        const job = await ImportJobManager.createJob({
-          sourceType: 'live_ssh',
-          sourceRef,
-          createdByUserId: user?.id
-        });
-
-        // Run inspection on pulled files
-        const manifest = await TarInspector.inspect({
-          sourceType: 'live_ssh',
-          filePath: pullResult.filesTarPath,
-          dbDumpFilePath: pullResult.sqlDumpPath
-        });
-
-        // Add real live-SSH detected cron jobs
-        if (pullResult.detectedCronJobs.length > 0) {
-          manifest.cron = {
-            found: true,
-            jobs: pullResult.detectedCronJobs
-          };
-        }
-
-        await ImportJobManager.updateJob(job.id, {
-          manifestJson: manifest,
-          status: 'detected'
-        });
-
-        const updated = await ImportJobManager.getJobById(job.id);
-        return reply.status(201).send({ job: updated, manifest });
+    if (normSourceType === 'live_ssh') {
+      if (!body.ssh) {
+        return reply.status(400).send({ error: 'SSH connection parameters are required for live_ssh source' });
       }
-
-      // Source A or B: tar or local pair
-      if (!sourceRef) {
-        return reply.status(400).send({ error: 'filePath is required for backup_tar or local_tar_gz' });
-      }
+      const stagingDir = path.resolve(process.cwd(), 'data/imports/live-ssh-' + Date.now());
+      const pullResult = await LiveSshService.pullLiveSite(body.ssh, stagingDir);
+      sourceRef = pullResult.filesTarPath;
 
       const job = await ImportJobManager.createJob({
-        sourceType: body.sourceType,
+        sourceType: 'live_ssh',
         sourceRef,
         createdByUserId: user?.id
       });
 
-      // Auto-run initial detection
-      try {
-        const manifest = await TarInspector.inspect({
-          sourceType: body.sourceType,
-          filePath: sourceRef,
-          dbDumpFilePath: body.dbDumpFilePath
-        });
+      // Run inspection on pulled files
+      const manifest = await TarInspector.inspect({
+        sourceType: 'live_ssh',
+        filePath: pullResult.filesTarPath,
+        dbDumpFilePath: pullResult.sqlDumpPath
+      });
 
-        await ImportJobManager.updateJob(job.id, {
-          manifestJson: manifest,
-          status: 'detected'
-        });
-
-        const updated = await ImportJobManager.getJobById(job.id);
-        return reply.status(201).send({ job: updated, manifest });
-      } catch (err: any) {
-        await ImportJobManager.updateJob(job.id, {
-          status: 'failed'
-        });
-        return reply.status(400).send({ error: `Detection failed: ${err.message}` });
+      // Add real live-SSH detected cron jobs
+      if (pullResult.detectedCronJobs.length > 0) {
+        manifest.cron = {
+          found: true,
+          jobs: pullResult.detectedCronJobs
+        };
       }
+
+      await ImportJobManager.updateJob(job.id, {
+        manifestJson: manifest,
+        status: 'detected'
+      });
+
+      const updated = await ImportJobManager.getJobById(job.id);
+      return reply.status(201).send({ job: updated, manifest });
     }
-  );
+
+    // Source A or B: tar or local pair
+    if (!sourceRef) {
+      return reply.status(400).send({ error: 'filePath or archivePath is required for backup_tar or local_tar_gz' });
+    }
+
+    const job = await ImportJobManager.createJob({
+      sourceType: normSourceType,
+      sourceRef,
+      createdByUserId: user?.id
+    });
+
+    // Auto-run initial detection
+    try {
+      const manifest = await TarInspector.inspect({
+        sourceType: normSourceType,
+        filePath: sourceRef,
+        dbDumpFilePath
+      });
+
+      await ImportJobManager.updateJob(job.id, {
+        manifestJson: manifest,
+        status: 'detected'
+      });
+
+      const updated = await ImportJobManager.getJobById(job.id);
+      return reply.status(201).send({ job: updated, manifest });
+    } catch (err: any) {
+      await ImportJobManager.updateJob(job.id, {
+        status: 'failed'
+      });
+      return reply.status(400).send({ error: `Detection failed: ${err.message}` });
+    }
+  };
+
+  // POST /api/v1/imports/cloudpanel & POST /api/v1/imports/detect
+  fastify.post('/cloudpanel', { preHandler: [requirePermission('import:cloudpanel')] }, handleInitiateImport);
+  fastify.post('/detect', { preHandler: [requirePermission('import:cloudpanel')] }, handleInitiateImport);
 
   // GET /api/v1/imports
   fastify.get(
@@ -197,6 +202,7 @@ export async function importRoutes(fastify: FastifyInstance): Promise<void> {
 
       const updated = await ImportJobManager.updateJob(id, {
         mappingJson: mapping,
+        dryRunResultJson: undefined,
         status: 'mapped'
       });
 
@@ -235,51 +241,56 @@ export async function importRoutes(fastify: FastifyInstance): Promise<void> {
         status: 'dry_run'
       });
 
-      return reply.send({ result });
-    }
-  );
-
-  // POST /api/v1/imports/:id/run
-  fastify.post(
-    '/:id/run',
-    { preHandler: [requirePermission('import:cloudpanel')] },
-    async (request, reply) => {
-      const { id } = request.params as { id: string };
-      const user = (request as any).user;
-      const job = await ImportJobManager.getJobById(id);
-
-      if (!job) {
-        return reply.status(404).send({ error: `Import job '${id}' not found` });
-      }
-
-      if (!job.manifestJson) {
-        return reply.status(400).send({ error: 'Manifest missing. Run detection first.' });
-      }
-
-      // Enforce dry-run must be executed and valid before import can run (FR-IMP-02, docs/05)
-      if (!job.dryRunResultJson) {
-        return reply.status(400).send({
-          error: 'Dry-run simulation must be executed before running the import. Please call POST /dry-run first.'
-        });
-      }
-
-      if (!job.dryRunResultJson.valid) {
-        return reply.status(400).send({
-          error: 'Cannot execute import: Dry-run found blocking errors',
-          errors: job.dryRunResultJson.errors
-        });
-      }
-
-      // Run import
-      const report = await ImportExecutor.execute({
-        jobId: id,
-        actorUserId: user?.id,
-        actorIp: request.ip
+      return reply.send({
+        result,
+        dryRunDiff: (result as any).diff || result.actions,
+        valid: result.valid,
+        errors: result.errors,
+        warnings: result.warnings
       });
-
-      return reply.send({ success: true, report });
     }
   );
+
+  const handleExecuteImport = async (request: any, reply: any) => {
+    const { id } = request.params as { id: string };
+    const user = request.user;
+    const job = await ImportJobManager.getJobById(id);
+
+    if (!job) {
+      return reply.status(404).send({ error: `Import job '${id}' not found` });
+    }
+
+    if (!job.manifestJson) {
+      return reply.status(400).send({ error: 'Manifest missing. Run detection first.' });
+    }
+
+    // Enforce dry-run must be executed and valid before import can run (FR-IMP-02, docs/05)
+    if (!job.dryRunResultJson) {
+      return reply.status(400).send({
+        error: 'Dry-run simulation must be executed before running the import. Please call POST /dry-run first.'
+      });
+    }
+
+    if (!job.dryRunResultJson.valid) {
+      return reply.status(400).send({
+        error: 'Cannot execute import: Dry-run found blocking errors',
+        errors: job.dryRunResultJson.errors
+      });
+    }
+
+    // Run import
+    const report = await ImportExecutor.execute({
+      jobId: id,
+      actorUserId: user?.id,
+      actorIp: request.ip
+    });
+
+    return reply.send({ success: true, report, job });
+  };
+
+  // POST /api/v1/imports/:id/run & POST /api/v1/imports/:id/execute
+  fastify.post('/:id/run', { preHandler: [requirePermission('import:cloudpanel')] }, handleExecuteImport);
+  fastify.post('/:id/execute', { preHandler: [requirePermission('import:cloudpanel')] }, handleExecuteImport);
 
   // POST /api/v1/imports/:id/rollback
   fastify.post(

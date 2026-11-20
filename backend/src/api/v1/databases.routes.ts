@@ -57,7 +57,23 @@ export async function databasesRoutes(fastify: FastifyInstance): Promise<void> {
   // 1. List databases (optionally filtered by siteId or engineId)
   fastify.get('/api/v1/databases', { preHandler: [requirePermission('db:view')] }, async (request) => {
     const query = request.query as any;
-    const list = await DbProvisioner.listDatabases(query?.siteId, query?.engineId);
+    const ctx = request.authContext!;
+    const siteId = query?.siteId;
+
+    if (ctx.role === 'user' || ctx.role === 'client') {
+      const assigned = ctx.assignedSiteIds || [];
+      if (siteId) {
+        if (!assigned.includes(siteId)) {
+          return { data: [], total: 0 };
+        }
+      } else {
+        const all = await DbProvisioner.listDatabases(undefined, query?.engineId);
+        const filtered = all.filter((d: any) => assigned.includes(d.site_id));
+        return { data: filtered, total: filtered.length };
+      }
+    }
+
+    const list = await DbProvisioner.listDatabases(siteId, query?.engineId);
     return { data: list, total: list.length };
   });
 

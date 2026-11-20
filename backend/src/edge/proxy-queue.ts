@@ -85,7 +85,20 @@ export class ProxyQueue {
     for (const item of ProxyQueue.queue) {
       try {
         if (item.action === 'create' && item.payload) {
-          await provider.createHost(item.payload as ProxyHostInput);
+          const res = await provider.createHost(item.payload as ProxyHostInput);
+          if (res?.edgeId) {
+            try {
+              const db = getDb();
+              const domains = (item.payload as any).domainNames || [];
+              const primaryDomain = domains[0];
+              if (primaryDomain) {
+                await db.execute(
+                  `UPDATE proxy_hosts SET edge_host_id = $1, drift_status = 'in_sync', updated_at = $2 WHERE domain_names LIKE $3 OR forward_host = $4`,
+                  [res.edgeId, new Date().toISOString(), `%${primaryDomain}%`, (item.payload as any).forwardHost]
+                );
+              }
+            } catch {}
+          }
         } else if (item.action === 'update' && item.edgeHostId && item.payload) {
           await provider.updateHost(item.edgeHostId, item.payload);
         } else if (item.action === 'delete' && item.edgeHostId) {
@@ -103,15 +116,20 @@ export class ProxyQueue {
           const db = getDb();
           db.execute('DELETE FROM proxy_mutation_queue WHERE id = $1', [item.id]).catch(() => {});
         } catch {}
-      } catch (err) {
+      } catch (err: any) {
         item.attempts++;
         if (item.attempts < 5) {
           remaining.push(item);
         } else {
-          // Exceeded max attempts, remove from queue
+          // Exceeded max attempts: mark drift status and log audit
           try {
             const db = getDb();
             db.execute('DELETE FROM proxy_mutation_queue WHERE id = $1', [item.id]).catch(() => {});
+            if (item.edgeHostId) {
+              db.execute(`UPDATE proxy_hosts SET drift_status = 'drift_detected' WHERE edge_host_id = $1`, [
+                item.edgeHostId
+              ]).catch(() => {});
+            }
           } catch {}
         }
       }

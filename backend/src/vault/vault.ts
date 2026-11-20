@@ -138,12 +138,22 @@ export class VaultService {
     return this.defaultInstance;
   }
 
+  public static reload(keyPath?: string): void {
+    const targetPath = keyPath || process.env.VAULT_KEY_PATH || path.resolve(process.cwd(), 'data/vault.key');
+    this.defaultInstance = new VaultService(targetPath);
+    this.defaultInstance.initialize();
+  }
+
   public static encrypt(plaintext: string): string {
     return this.getDefaultInstance().encrypt(plaintext);
   }
 
   public static decrypt(cipherRef: string): string {
     return this.getDefaultInstance().decrypt(cipherRef);
+  }
+
+  public static isEncrypted(value?: string | null): boolean {
+    return typeof value === 'string' && value.startsWith('vault:enc:v1:');
   }
 
   /**
