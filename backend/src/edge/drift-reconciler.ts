@@ -154,7 +154,15 @@ export class DriftReconciler {
         } else if (item.status === 'drifted' && item.panelHostId && item.edgeHostId) {
           const res = await db.query<ProxyHost>('SELECT * FROM proxy_hosts WHERE id = $1', [item.panelHostId]);
           if (res.rows.length > 0) {
-            const ph = res.rows[0];
+            const raw = res.rows[0];
+            const ph = {
+              id: raw.id,
+              domainNames: raw.domainNames || (raw as any).domain_names,
+              forwardScheme: (raw.forwardScheme || (raw as any).forward_scheme || 'http') as 'http' | 'https',
+              forwardHost: raw.forwardHost || (raw as any).forward_host,
+              forwardPort: raw.forwardPort ?? (raw as any).forward_port,
+              enabled: raw.enabled !== undefined ? raw.enabled : (raw as any).enabled
+            };
             await this.provider.updateHost(item.edgeHostId, {
               domainNames: ph.domainNames,
               forwardScheme: ph.forwardScheme,

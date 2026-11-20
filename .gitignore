@@ -9,12 +9,16 @@ build/
 *.tsbuildinfo
 
 # NexPanel Runtime Data & Vault Keys (Never commit sensitive keys or sites)
+data/
 backend/data/panel/vault.key
 backend/data/sites/
 backend/data/backups/
 backend/data/imports/
 backend/htdocs/
+cli/data/backups/
 cli/temp/
+*.key
+*.pem
 
 # Environment Variables
 .env
@@ -24,6 +28,7 @@ cli/temp/
 
 # Logs
 logs/
+!backend/src/logs/
 *.log
 npm-debug.log*
 yarn-debug.log*

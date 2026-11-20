@@ -119,7 +119,7 @@ export class DbProvisioner {
 
     await db.execute(
       `INSERT INTO databases (
-        id, site_id, engine_id, name, charset, collation, status, created_at, updated_at
+        id, site_id, engine_id, name, charset, "collation", status, created_at, updated_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [dbId, input.siteId || null, engine.id, input.name, charset, collation, 'active', now, now]
     );

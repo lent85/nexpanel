@@ -75,7 +75,14 @@ export class NpmClient {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    let res = await fetch(url, { ...options, headers });
+    let res: Response;
+    try {
+      res = await fetch(url, { ...options, headers });
+    } catch (err: any) {
+      // Retry once on transient socket closure during Nginx reload
+      await new Promise((r) => setTimeout(r, 600));
+      res = await fetch(url, { ...options, headers });
+    }
 
     // Handle token expiration / retry on 401
     if (res.status === 401 && !isTokenRoute && this.adminPassword) {
@@ -101,8 +108,14 @@ export class NpmClient {
 
   public async health(): Promise<{ ok: boolean; version?: string }> {
     try {
-      const data = await this.request<{ version?: string }>('/');
-      return { ok: true, version: data.version || '2.16.0' };
+      const data = await this.request<{ version?: any }>('/');
+      let ver = '2.16.0';
+      if (typeof data.version === 'string') {
+        ver = data.version;
+      } else if (data.version && typeof data.version === 'object') {
+        ver = `${data.version.major}.${data.version.minor}.${data.version.revision}`;
+      }
+      return { ok: true, version: ver };
     } catch {
       // NPM 2.16 often returns 200 or 401 on /api/ if not authenticated, test token acquisition
       try {

@@ -1,0 +1,40 @@
+# ==============================================================================
+# .dockerignore — NexPanel Docker build exclusion list
+# ==============================================================================
+
+# Dependency directories and lockfiles
+**/node_modules
+**/dist
+**/.cache
+**/.vite
+
+# Environment configuration and private secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Persistent data, site volumes, and logs
+data/
+backups/
+logs/
+
+# Git and developer tooling metadata
+.git
+.github
+.gitignore
+.vscode
+.cursor
+.agents
+.codegraph
+mcp_config.json
+.mcp.json
+
+# Test fixtures and temporary test outputs
+fixtures/
+coverage/
+*.log
+
+# Documentation
+docs/

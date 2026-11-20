@@ -4,8 +4,69 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Backend: Dev Server",
+      "name": "Backend: Start with Seed Data (Memory DB)",
       "cwd": "${workspaceFolder}/backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "env": {
+        "PANEL_DB_USE_MEMORY": "true",
+        "PANEL_SEED_DATA": "true",
+        "PANEL_PORT": "8443",
+        "PANEL_HOST": "0.0.0.0"
+      },
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Backend: Start with Seed Data (PostgreSQL)",
+      "cwd": "${workspaceFolder}/backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "env": {
+        "PANEL_DB_USE_MEMORY": "false",
+        "PANEL_SEED_DATA": "true",
+        "PANEL_PORT": "8443",
+        "PANEL_HOST": "0.0.0.0"
+      },
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Backend: Dev Server (Normal)",
+      "cwd": "${workspaceFolder}/backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "env": {
+        "PANEL_DB_USE_MEMORY": "false",
+        "PANEL_PORT": "8443"
+      },
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Backend: Run Seeder Only (Memory DB)",
+      "cwd": "${workspaceFolder}/backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "seed:memory"],
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Backend: Run Seeder Only (PostgreSQL)",
+      "cwd": "${workspaceFolder}/backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "seed"],
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Frontend: Dev Server",
+      "cwd": "${workspaceFolder}/frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "console": "integratedTerminal"
@@ -13,10 +74,44 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Backend: Run Tests",
+      "name": "CLI: nxctl (Health Check)",
+      "cwd": "${workspaceFolder}/cli",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["dist/bin/nxctl.js", "health", "--json"],
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "CLI: nxctl (List Sites)",
+      "cwd": "${workspaceFolder}/cli",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["dist/bin/nxctl.js", "site:list", "--json"],
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Backend: Run All Tests",
       "cwd": "${workspaceFolder}/backend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["test"],
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Backend: Run Live NPM & Multi-Runtime Tests",
+      "cwd": "${workspaceFolder}/backend",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--import",
+        "tsx",
+        "--test",
+        "--test-concurrency=1",
+        "test/m3-npm-live.test.ts",
+        "test/m3-multi-runtime-proxy.test.ts"
+      ],
       "console": "integratedTerminal"
     },
     {
@@ -36,6 +131,29 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "fixtures:generate"],
       "console": "integratedTerminal"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full Stack: Backend (Seed Memory) + Frontend",
+      "configurations": [
+        "Backend: Start with Seed Data (Memory DB)",
+        "Frontend: Dev Server"
+      ]
+    },
+    {
+      "name": "Full Stack: Backend (Seed PostgreSQL) + Frontend",
+      "configurations": [
+        "Backend: Start with Seed Data (PostgreSQL)",
+        "Frontend: Dev Server"
+      ]
+    },
+    {
+      "name": "Full Stack: Backend (Normal) + Frontend",
+      "configurations": [
+        "Backend: Dev Server (Normal)",
+        "Frontend: Dev Server"
+      ]
     }
   ]
 }

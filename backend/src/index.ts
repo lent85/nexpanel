@@ -3,6 +3,7 @@ import { getEnv } from './config/env.js';
 import { getDb } from './db/index.js';
 import { brand } from './config/brand.js';
 import { ProxyQueue } from './edge/proxy-queue.js';
+import { Seeder } from './db/seeder.js';
 
 async function start() {
   const env = getEnv();
@@ -14,6 +15,15 @@ async function start() {
     console.log('Database schema migrations applied.');
   } catch (err: any) {
     console.warn('Database migration warning:', err.message);
+  }
+
+  // Seed initial data if requested via env (PANEL_SEED_DATA=true) or flag (--seed)
+  if (env.PANEL_SEED_DATA || process.argv.includes('--seed')) {
+    try {
+      await Seeder.seed();
+    } catch (err: any) {
+      console.warn('Database seeding warning:', err.message);
+    }
   }
 
   // Start background proxy queue auto-drain reconciler (FR-PROXY-07)

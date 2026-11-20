@@ -61,7 +61,7 @@ export class NpmEdgeProvider implements EdgeProvider {
       ssl_forced: Boolean(input.sslForced),
       hsts_enabled: Boolean(input.hstsEnabled),
       http2_support: input.http2Support !== false,
-      websocket_support: Boolean(input.websocketSupport),
+      allow_websocket_upgrade: Boolean(input.websocketSupport),
       advanced_config: input.advancedConfig || '',
       enabled: input.enabled !== false
     };
@@ -84,7 +84,7 @@ export class NpmEdgeProvider implements EdgeProvider {
     if (input.sslForced !== undefined) payload.ssl_forced = input.sslForced;
     if (input.hstsEnabled !== undefined) payload.hsts_enabled = input.hstsEnabled;
     if (input.http2Support !== undefined) payload.http2_support = input.http2Support;
-    if (input.websocketSupport !== undefined) payload.websocket_support = input.websocketSupport;
+    if (input.websocketSupport !== undefined) payload.allow_websocket_upgrade = input.websocketSupport;
     if (input.accessListId !== undefined) payload.access_list_id = input.accessListId;
     if (input.advancedConfig !== undefined) payload.advanced_config = input.advancedConfig;
 
@@ -172,7 +172,7 @@ export class NpmEdgeProvider implements EdgeProvider {
       sslForced: Boolean(h.ssl_forced),
       hstsEnabled: Boolean(h.hsts_enabled),
       http2Support: Boolean(h.http2_support),
-      websocketSupport: Boolean(h.websocket_support),
+      websocketSupport: Boolean(h.allow_websocket_upgrade || h.websocket_support),
       accessListId: h.access_list_id,
       enabled: Boolean(h.enabled)
     }));

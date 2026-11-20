@@ -10,13 +10,21 @@
     "test:backend": "npm --prefix backend test",
     "test:cli": "npm --prefix cli test",
     "dev:backend": "npm --prefix backend run dev",
+    "dev:backend:seed": "npm --prefix backend run dev:seed",
+    "dev:backend:seed:memory": "npm --prefix backend run dev:seed:memory",
+    "seed": "npm --prefix backend run seed",
+    "seed:memory": "npm --prefix backend run seed:memory",
     "dev:frontend": "npm --prefix frontend run dev",
     "typecheck": "npm --prefix backend run typecheck && npm --prefix cli run typecheck && npm --prefix frontend run typecheck",
     "fixtures:generate": "npm --prefix backend run fixtures:generate",
     "codegraph:sync": "codegraph sync",
     "codegraph:status": "codegraph status",
     "lab:up": "docker compose -f docker/lab-compose.yml up -d",
-    "lab:down": "docker compose -f docker/lab-compose.yml down"
+    "lab:down": "docker compose -f docker/lab-compose.yml down",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
   },
   "license": "Apache-2.0"
 }

@@ -68,22 +68,28 @@ export async function getEdgeProvider(providerId?: string): Promise<{ provider: 
     return { provider: new NpmEdgeProvider(client) };
   }
 
-  const record = res.rows[0];
+  const record: any = res.rows[0];
   const env = getEnv();
   const vault = new VaultService(env.VAULT_KEY_PATH);
   let decryptedCreds: { password?: string; token?: string } = {};
 
-  try {
-    const raw = vault.decrypt(record.credentialsSecretRef);
-    decryptedCreds = JSON.parse(raw);
-  } catch {
-    // fallback
+  const secretRef = record.credentials_secret_ref || record.credentialsSecretRef;
+  if (secretRef) {
+    try {
+      const raw = vault.decrypt(secretRef);
+      decryptedCreds = JSON.parse(raw);
+    } catch {
+      // fallback
+    }
   }
 
+  const baseUrl = record.base_url || record.baseUrl || env.NPM_BASE_URL;
+  const adminEmail = record.admin_email || record.adminEmail || env.NPM_ADMIN_EMAIL;
+
   const client = new NpmClient({
-    baseUrl: record.baseUrl,
-    adminEmail: record.adminEmail,
-    adminPassword: decryptedCreds.password,
+    baseUrl,
+    adminEmail,
+    adminPassword: decryptedCreds.password || env.NPM_ADMIN_PASSWORD,
     apiToken: decryptedCreds.token
   });
 
@@ -313,17 +319,19 @@ export async function edgeRoutes(fastify: FastifyInstance): Promise<void> {
       return;
     }
 
-    const host = res.rows[0];
-    const { provider } = await getEdgeProvider(host.edgeProviderId);
+    const host: any = res.rows[0];
+    const edgeProviderId = host.edge_provider_id || host.edgeProviderId;
+    const edgeHostId = host.edge_host_id || host.edgeHostId;
+    const { provider } = await getEdgeProvider(edgeProviderId);
 
-    if (host.edgeHostId) {
+    if (edgeHostId) {
       try {
-        await provider.deleteHost(host.edgeHostId);
+        await provider.deleteHost(edgeHostId);
       } catch (err) {
         // Queue delete if edge is down
         ProxyQueue.enqueue({
           action: 'delete',
-          edgeHostId: host.edgeHostId
+          edgeHostId: edgeHostId
         });
       }
     }

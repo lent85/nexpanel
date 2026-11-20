@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS databases (
   engine_id UUID NOT NULL REFERENCES db_engines(id) ON DELETE CASCADE,
   name VARCHAR(64) NOT NULL,
   charset VARCHAR(32) NOT NULL DEFAULT 'utf8mb4',
-  collation VARCHAR(64) NOT NULL DEFAULT 'utf8mb4_unicode_ci',
+  "collation" VARCHAR(64) NOT NULL DEFAULT 'utf8mb4_unicode_ci',
   status VARCHAR(32) NOT NULL DEFAULT 'active',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

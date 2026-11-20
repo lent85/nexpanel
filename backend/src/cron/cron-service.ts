@@ -98,9 +98,10 @@ export class CronService {
 
     try {
       // Execute command with timeout
+      const shell = process.platform === 'win32' ? 'powershell' : '/bin/bash';
       const result = await execAsync(job.command, {
         timeout: (job.timeoutSec || 3600) * 1000,
-        shell: 'powershell'
+        shell
       });
       stdoutTail = (result.stdout || '').substring(0, 1000);
       stderrTail = (result.stderr || '').substring(0, 1000);

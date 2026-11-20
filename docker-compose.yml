@@ -1,0 +1,198 @@
+# ==============================================================================
+# NexPanel — Production Docker Compose (Deployment from Source)
+# Architecture: docs/03-ARCHITECTURE.md and docs/08-DEPLOYMENT-OPERATIONS.md
+# Non-Negotiable Rules:
+#   R1: Only NPM container owns ports 80/443. Panel interacts with NPM via API.
+#   R2: Databases are pluggable engines. Panel metadata DB (Postgres) is private.
+#   R3: CloudPanel import supported as first-class feature.
+#
+# Prerequisite: Create the external shared proxy network once:
+#   docker network create proxy
+#
+# Start deployment:
+#   docker compose up -d --build
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Edge Reverse Proxy (Nginx Proxy Manager 2.16.0)
+  # Exclusively owns host ports 80 and 443 (Hard Rule R1).
+  # ----------------------------------------------------------------------------
+  npm:
+    image: jc21/nginx-proxy-manager:2.16.0
+    container_name: npm
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      # Admin UI loopback-only for security; access via SSH tunnel or reverse proxy
+      - "127.0.0.1:81:81"
+    environment:
+      DISABLE_IPV6: "true"
+    volumes:
+      - npm-data:/data
+      - npm-letsencrypt:/etc/letsencrypt
+    networks:
+      - proxy
+
+  # ----------------------------------------------------------------------------
+  # 2. NexPanel Metadata Database (PostgreSQL 16)
+  # Private metadata store for NexPanel; strictly isolated from site databases (R2).
+  # ----------------------------------------------------------------------------
+  nexpanel-db:
+    image: postgres:16-alpine
+    container_name: nexpanel-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PANEL_DB_NAME:-nexpanel}
+      POSTGRES_USER: ${PANEL_DB_USER:-nexpanel}
+      POSTGRES_PASSWORD: ${PANEL_DB_PASSWORD:-nexpanel_secret}
+    volumes:
+      - nexpanel-db-data:/var/lib/postgresql/data
+    networks:
+      - panel
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PANEL_DB_USER:-nexpanel} -d ${PANEL_DB_NAME:-nexpanel}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------------------------
+  # 3. Internal Site Database Engine (MySQL 8.4)
+  # Pluggable internal site engine (R2); joins 'sites' network only, never 'proxy'.
+  # ----------------------------------------------------------------------------
+  nexpanel-mysql:
+    image: mysql:8.4
+    container_name: nexpanel-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${INTERNAL_MYSQL_ROOT_PASSWORD:-InternalMySQL_Root_2026!}
+    volumes:
+      - nexpanel-mysql-data:/var/lib/mysql
+    networks:
+      - sites
+
+  # ----------------------------------------------------------------------------
+  # 4. NexPanel Web Control Panel & REST API (Built from Source)
+  # Serves React Frontend SPA + Fastify REST API on port 8443.
+  # ----------------------------------------------------------------------------
+  nexpanel-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nexpanel:latest
+    container_name: nexpanel-web
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      PANEL_PORT: 8443
+      PANEL_HOST: 0.0.0.0
+      PANEL_DOMAIN: ${PANEL_DOMAIN:-panel.example.com}
+      PANEL_BASE_URL: ${PANEL_BASE_URL:-https://panel.example.com}
+      PANEL_DB_HOST: nexpanel-db
+      PANEL_DB_PORT: 5432
+      PANEL_DB_USER: ${PANEL_DB_USER:-nexpanel}
+      PANEL_DB_PASSWORD: ${PANEL_DB_PASSWORD:-nexpanel_secret}
+      PANEL_DB_NAME: ${PANEL_DB_NAME:-nexpanel}
+      NPM_BASE_URL: http://npm:81
+      NPM_NETWORK: proxy
+      NPM_ADMIN_EMAIL: ${NPM_ADMIN_EMAIL:-admin@example.com}
+      NPM_ADMIN_PASSWORD: ${NPM_ADMIN_PASSWORD:-changeme}
+      NPM_LETSENCRYPT_EMAIL: ${NPM_LETSENCRYPT_EMAIL:-admin@example.com}
+      JWT_SECRET: ${JWT_SECRET:-nexpanel_secure_production_jwt_key_64_characters_random_string_2026}
+      VAULT_KEY_PATH: /data/panel/vault.key
+      PANEL_DATA_DIR: /data/panel
+      SITES_DATA_DIR: /data/sites
+      FRONTEND_DIST_DIR: /app/frontend/dist
+    volumes:
+      - ./data/panel:/data/panel
+      - ./data/sites:/data/sites
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      # Direct loopback access for initial setup / emergency SSH tunnel (default 8444 to avoid host dev collisions)
+      - "${PANEL_HOST_PORT:-127.0.0.1:8444}:8443"
+    expose:
+      - "8443"
+    networks:
+      - proxy
+      - panel
+      - sites
+    depends_on:
+      nexpanel-db:
+        condition: service_healthy
+      npm:
+        condition: service_started
+
+  # ----------------------------------------------------------------------------
+  # 5. NexPanel Background Worker (Optional / Profile)
+  # Dedicated container for background tasks, import operations, and cron jobs.
+  # ----------------------------------------------------------------------------
+  nexpanel-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nexpanel:latest
+    container_name: nexpanel-worker
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      PANEL_DB_HOST: nexpanel-db
+      PANEL_DB_PORT: 5432
+      PANEL_DB_USER: ${PANEL_DB_USER:-nexpanel}
+      PANEL_DB_PASSWORD: ${PANEL_DB_PASSWORD:-nexpanel_secret}
+      PANEL_DB_NAME: ${PANEL_DB_NAME:-nexpanel}
+      NPM_BASE_URL: http://npm:81
+      NPM_NETWORK: proxy
+      NPM_ADMIN_EMAIL: ${NPM_ADMIN_EMAIL:-admin@example.com}
+      NPM_ADMIN_PASSWORD: ${NPM_ADMIN_PASSWORD:-changeme}
+      NPM_LETSENCRYPT_EMAIL: ${NPM_LETSENCRYPT_EMAIL:-admin@example.com}
+      JWT_SECRET: ${JWT_SECRET:-nexpanel_secure_production_jwt_key_64_characters_random_string_2026}
+      VAULT_KEY_PATH: /data/panel/vault.key
+      PANEL_DATA_DIR: /data/panel
+      SITES_DATA_DIR: /data/sites
+    volumes:
+      - ./data/panel:/data/panel
+      - ./data/sites:/data/sites
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - proxy
+      - panel
+      - sites
+    depends_on:
+      nexpanel-db:
+        condition: service_healthy
+    profiles:
+      - worker
+
+# ------------------------------------------------------------------------------
+# Network Topology per docs/03 §3.3.1
+# ------------------------------------------------------------------------------
+networks:
+  proxy:
+    name: proxy
+    external: true
+  panel:
+    name: nexpanel-panel
+    driver: bridge
+  sites:
+    name: nexpanel-sites
+    driver: bridge
+
+# ------------------------------------------------------------------------------
+# Persistent Volume Storage
+# ------------------------------------------------------------------------------
+volumes:
+  npm-data:
+    name: nexpanel-npm-data
+  npm-letsencrypt:
+    name: nexpanel-npm-letsencrypt
+  nexpanel-db-data:
+    name: nexpanel-db-data
+  nexpanel-mysql-data:
+    name: nexpanel-mysql-data

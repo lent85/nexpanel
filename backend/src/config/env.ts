@@ -42,6 +42,7 @@ export const envSchema = z.object({
   PANEL_DB_PASSWORD: z.string().default('nexpanel_secret'),
   PANEL_DB_NAME: z.string().default('nexpanel'),
   PANEL_DB_USE_MEMORY: booleanFromString.default(false), // Robust boolean parsing
+  PANEL_SEED_DATA: booleanFromString.default(false),
 
   // Edge / NPM
   NPM_BASE_URL: z.string().default('http://npm:81'),
@@ -52,7 +53,8 @@ export const envSchema = z.object({
 
   // Site Defaults
   SITES_DATA_DIR: z.string().default(path.resolve(process.cwd(), 'data/sites')),
-  PANEL_DATA_DIR: z.string().default(path.resolve(process.cwd(), 'data/panel'))
+  PANEL_DATA_DIR: z.string().default(path.resolve(process.cwd(), 'data/panel')),
+  FRONTEND_DIST_DIR: z.string().optional()
 }).refine((data) => {
   if (data.NODE_ENV === 'production') {
     if (!data.JWT_SECRET || data.JWT_SECRET.includes('change_me') || data.JWT_SECRET.length < 32) {

@@ -1,9 +1,13 @@
 import fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { ZodError } from 'zod';
 import { brand } from './config/brand.js';
+import { getEnv } from './config/env.js';
 import { healthRoutes } from './api/v1/health.routes.js';
 import { authRoutes } from './api/v1/auth.routes.js';
 import { usersRoutes } from './api/v1/users.routes.js';
@@ -106,6 +110,46 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(securityRoutes);
   await app.register(backupsRoutes);
   await app.register(importRoutes, { prefix: '/api/v1/imports' });
+
+  // Register static file serving for React frontend (production UI)
+  const env = getEnv();
+  const frontendCandidates = [
+    env.FRONTEND_DIST_DIR,
+    path.resolve(process.cwd(), '../frontend/dist'),
+    path.resolve(process.cwd(), 'frontend/dist'),
+    path.resolve(process.cwd(), 'dist/public')
+  ].filter(Boolean) as string[];
+
+  let frontendDist: string | null = null;
+  for (const candidate of frontendCandidates) {
+    if (fs.existsSync(candidate) && fs.existsSync(path.join(candidate, 'index.html'))) {
+      frontendDist = candidate;
+      break;
+    }
+  }
+
+  if (frontendDist) {
+    await app.register(fastifyStatic, {
+      root: frontendDist,
+      prefix: '/',
+      wildcard: true
+    });
+
+    app.setNotFoundHandler((request, reply) => {
+      // API or docs 404 should return standard JSON error
+      if (request.url.startsWith('/api') || request.url.startsWith('/docs')) {
+        reply.status(404).send({
+          error: {
+            code: 'NOT_FOUND',
+            message: `Route ${request.method}:${request.url} not found`
+          }
+        });
+        return;
+      }
+      // SPA fallback serves index.html for frontend navigation routes
+      return reply.sendFile('index.html');
+    });
+  }
 
   return app;
 }
