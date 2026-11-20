@@ -47,53 +47,7 @@ export async function getEdgeProvider(providerId?: string): Promise<{ provider: 
     return { provider: mockProviderOverride };
   }
 
-  const db = getDb();
-  let query = 'SELECT * FROM edge_providers WHERE kind = $1';
-  let params: any[] = ['npm'];
-
-  if (providerId) {
-    query = 'SELECT * FROM edge_providers WHERE id = $1';
-    params = [providerId];
-  }
-
-  const res = await db.query<DbEdgeProvider>(query, params);
-  if (res.rows.length === 0) {
-    // Return default instance from environment variables
-    const env = getEnv();
-    const client = new NpmClient({
-      baseUrl: env.NPM_BASE_URL,
-      adminEmail: env.NPM_ADMIN_EMAIL,
-      adminPassword: env.NPM_ADMIN_PASSWORD
-    });
-    return { provider: new NpmEdgeProvider(client) };
-  }
-
-  const record: any = res.rows[0];
-  const env = getEnv();
-  const vault = new VaultService(env.VAULT_KEY_PATH);
-  let decryptedCreds: { password?: string; token?: string } = {};
-
-  const secretRef = record.credentials_secret_ref || record.credentialsSecretRef;
-  if (secretRef) {
-    try {
-      const raw = vault.decrypt(secretRef);
-      decryptedCreds = JSON.parse(raw);
-    } catch {
-      // fallback
-    }
-  }
-
-  const baseUrl = record.base_url || record.baseUrl || env.NPM_BASE_URL;
-  const adminEmail = record.admin_email || record.adminEmail || env.NPM_ADMIN_EMAIL;
-
-  const client = new NpmClient({
-    baseUrl,
-    adminEmail,
-    adminPassword: decryptedCreds.password || env.NPM_ADMIN_PASSWORD,
-    apiToken: decryptedCreds.token
-  });
-
-  return { provider: new NpmEdgeProvider(client), record };
+  return NpmEdgeProvider.resolve(providerId);
 }
 
 export async function edgeRoutes(fastify: FastifyInstance): Promise<void> {
@@ -228,30 +182,15 @@ export async function edgeRoutes(fastify: FastifyInstance): Promise<void> {
         enabled: body.enabled
       });
       edgeHostId = edgeRes.edgeId;
-    } catch (err: any) {
-      // If NPM is down, queue mutation per FR-PROXY-07
-      ProxyQueue.enqueue({
-        action: 'create',
-        payload: {
-          domainNames: body.domainNames,
-          forwardScheme: body.forwardScheme,
-          forwardHost: body.forwardHost,
-          forwardPort: body.forwardPort,
-          certificateId: body.certificateId,
-          sslForced: body.sslForced,
-          hstsEnabled: body.hsts,
-          http2Support: body.http2,
-          websocketSupport: body.websocket,
-          accessListId: body.accessListId,
-          enabled: body.enabled
-        }
-      });
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status && status < 500) throw Object.assign(error as Error, { statusCode: status });
     }
 
     const hostEntry: ProxyHost = {
       id,
       siteId: body.siteId,
-      edgeProviderId: record?.id || id,
+      edgeProviderId: record?.id,
       edgeHostId,
       domainNames: body.domainNames,
       forwardScheme: body.forwardScheme,
@@ -276,7 +215,7 @@ export async function edgeRoutes(fastify: FastifyInstance): Promise<void> {
       [
         hostEntry.id,
         hostEntry.siteId || null,
-        hostEntry.edgeProviderId,
+        hostEntry.edgeProviderId ?? null,
         hostEntry.edgeHostId,
         hostEntry.domainNames,
         hostEntry.forwardScheme,
@@ -295,6 +234,26 @@ export async function edgeRoutes(fastify: FastifyInstance): Promise<void> {
         hostEntry.updatedAt
       ]
     );
+
+    if (!edgeHostId) {
+      await ProxyQueue.enqueue({
+        action: 'create',
+        proxyHostId: id,
+        payload: {
+          domainNames: body.domainNames,
+          forwardScheme: body.forwardScheme,
+          forwardHost: body.forwardHost,
+          forwardPort: body.forwardPort,
+          certificateId: body.certificateId,
+          sslForced: body.sslForced,
+          hstsEnabled: body.hsts,
+          http2Support: body.http2,
+          websocketSupport: body.websocket,
+          accessListId: body.accessListId,
+          enabled: body.enabled
+        }
+      });
+    }
 
     await AuditService.log({
       actorUserId: request.user!.sub,
@@ -329,7 +288,7 @@ export async function edgeRoutes(fastify: FastifyInstance): Promise<void> {
         await provider.deleteHost(edgeHostId);
       } catch (err) {
         // Queue delete if edge is down
-        ProxyQueue.enqueue({
+        await ProxyQueue.enqueue({
           action: 'delete',
           edgeHostId: edgeHostId
         });

@@ -38,6 +38,7 @@ export class NpmClient {
     const url = `${this.baseUrl}/api/tokens`;
     const res = await fetch(url, {
       method: 'POST',
+      signal: AbortSignal.timeout(5000),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         identity: this.adminEmail,
@@ -50,7 +51,10 @@ export class NpmClient {
       throw new Error(`NPM Authentication failed (${res.status}): ${errText}`);
     }
 
-    const data = (await res.json()) as { token: string; expires?: string };
+    const data = (await res.json()) as { token?: string; expires?: string; requires_2fa?: boolean };
+    if (!data.token || data.requires_2fa) {
+      throw new Error('NPM login requires an automation credential that does not prompt for interactive MFA');
+    }
     this.token = data.token;
     this.tokenExpiresAt = data.expires ? new Date(data.expires).getTime() : Date.now() + 24 * 60 * 60 * 1000;
     return this.token;
@@ -65,8 +69,9 @@ export class NpmClient {
     }
 
     const url = `${this.baseUrl}/api/${endpoint.replace(/^\/+/, '')}`;
+    const requestOptions = { signal: AbortSignal.timeout(10000), ...options };
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+      ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
       Accept: 'application/json',
       ...((options.headers as Record<string, string>) || {})
     };
@@ -77,11 +82,12 @@ export class NpmClient {
 
     let res: Response;
     try {
-      res = await fetch(url, { ...options, headers });
+      res = await fetch(url, { ...requestOptions, headers });
     } catch (err: any) {
-      // Retry once on transient socket closure during Nginx reload
+      if (options.method && options.method !== 'GET') throw err;
+      // Retry reads once on transient socket closure during Nginx reload
       await new Promise((r) => setTimeout(r, 600));
-      res = await fetch(url, { ...options, headers });
+      res = await fetch(url, { ...requestOptions, headers });
     }
 
     // Handle token expiration / retry on 401
@@ -89,7 +95,7 @@ export class NpmClient {
       this.token = undefined;
       token = await this.getValidToken();
       headers['Authorization'] = `Bearer ${token}`;
-      res = await fetch(url, { ...options, headers });
+      res = await fetch(url, { ...requestOptions, headers });
     }
 
     const isJson = res.headers.get('content-type')?.includes('application/json');
@@ -109,7 +115,7 @@ export class NpmClient {
   public async health(): Promise<{ ok: boolean; version?: string }> {
     try {
       const data = await this.request<{ version?: any }>('/');
-      let ver = '2.16.0';
+      let ver: string | undefined;
       if (typeof data.version === 'string') {
         ver = data.version;
       } else if (data.version && typeof data.version === 'object') {
@@ -117,13 +123,7 @@ export class NpmClient {
       }
       return { ok: true, version: ver };
     } catch {
-      // NPM 2.16 often returns 200 or 401 on /api/ if not authenticated, test token acquisition
-      try {
-        await this.getValidToken();
-        return { ok: true, version: '2.16.0' };
-      } catch (err: any) {
-        return { ok: false };
-      }
+      return { ok: false };
     }
   }
 
@@ -181,6 +181,18 @@ export class NpmClient {
   }
 
   // Access Lists
+  public async uploadCertificateFiles(id: number, files: Record<string, string>): Promise<void> {
+    const body = new FormData();
+    for (const [name, contents] of Object.entries(files)) {
+      body.append(name, new Blob([contents], { type: 'application/x-pem-file' }), `${name}.pem`);
+    }
+    await this.request(`nginx/certificates/${id}/upload`, { method: 'POST', body });
+  }
+
+  public async deleteCertificate(id: number): Promise<void> {
+    await this.request(`nginx/certificates/${id}`, { method: 'DELETE' });
+  }
+
   public async getAccessLists(): Promise<any[]> {
     return this.request<any[]>('nginx/access-lists');
   }

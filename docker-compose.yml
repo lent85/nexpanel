@@ -19,7 +19,7 @@ services:
   # Exclusively owns host ports 80 and 443 (Hard Rule R1).
   # ----------------------------------------------------------------------------
   npm:
-    image: jc21/nginx-proxy-manager:2.16.0
+    image: ${NEXPANEL_NPM_IMAGE:-jc21/nginx-proxy-manager:2.16.0}
     container_name: npm
     restart: unless-stopped
     ports:
@@ -106,10 +106,12 @@ services:
       VAULT_KEY_PATH: /data/panel/vault.key
       PANEL_DATA_DIR: /data/panel
       SITES_DATA_DIR: /data/sites
+      SITES_NETWORK: nexpanel-sites
+      SITES_HOST_DATA_DIR: ${NEXPANEL_HOST_SITES_DIR:-${PWD}/data/sites}
       FRONTEND_DIST_DIR: /app/frontend/dist
     volumes:
       - ./data/panel:/data/panel
-      - ./data/sites:/data/sites
+      - ${NEXPANEL_HOST_SITES_DIR:-${PWD}/data/sites}:/data/sites
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       # Direct loopback access for initial setup / emergency SSH tunnel (default 8444 to avoid host dev collisions)
@@ -156,9 +158,11 @@ services:
       VAULT_KEY_PATH: /data/panel/vault.key
       PANEL_DATA_DIR: /data/panel
       SITES_DATA_DIR: /data/sites
+      SITES_NETWORK: nexpanel-sites
+      SITES_HOST_DATA_DIR: ${NEXPANEL_HOST_SITES_DIR:-${PWD}/data/sites}
     volumes:
       - ./data/panel:/data/panel
-      - ./data/sites:/data/sites
+      - ${NEXPANEL_HOST_SITES_DIR:-${PWD}/data/sites}:/data/sites
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - proxy

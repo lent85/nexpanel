@@ -105,15 +105,15 @@ describe('Milestone 3 External NPM Integration (R1)', () => {
     // 1. Direct validation check
     assert.throws(
       () => NpmEdgeProvider.validateForwardHost('localhost'),
-      /causes a 502 Bad Gateway/
+      /Docker container or service name/
     );
     assert.throws(
       () => NpmEdgeProvider.validateForwardHost('127.0.0.1'),
-      /causes a 502 Bad Gateway/
+      /Docker container or service name/
     );
     assert.throws(
       () => NpmEdgeProvider.validateForwardHost('127.0.0.50'),
-      /causes a 502 Bad Gateway/
+      /Docker container or service name/
     );
 
     // 2. Valid container names pass cleanly
@@ -162,9 +162,14 @@ describe('Milestone 3 External NPM Integration (R1)', () => {
     // 1. Mark mock client offline
     mockClient.isOnline = false;
 
-    // 2. Enqueue creation
-    ProxyQueue.enqueue({
+    // Two local hosts can share an origin. Only the queued record should be updated.
+    await memoryDb.execute('INSERT INTO proxy_hosts (id, forward_host, edge_host_id) VALUES ($1, $2, $3)',
+      ['queued-host', 'site-queued-web', 0]);
+    await memoryDb.execute('INSERT INTO proxy_hosts (id, forward_host, edge_host_id) VALUES ($1, $2, $3)',
+      ['other-host', 'site-queued-web', 777]);
+    await ProxyQueue.enqueue({
       action: 'create',
+      proxyHostId: 'queued-host',
       payload: {
         domainNames: ['queued.example.com'],
         forwardScheme: 'http',
@@ -189,7 +194,12 @@ describe('Milestone 3 External NPM Integration (R1)', () => {
     assert.strictEqual(drain2.remaining, 0);
 
     const edgeHosts = await provider.listHosts();
-    assert.strictEqual(edgeHosts.some((h) => h.domainNames.includes('queued.example.com')), true);
+    const edgeHost = edgeHosts.find((h) => h.domainNames.includes('queued.example.com'));
+    assert.ok(edgeHost);
+    const { rows } = await memoryDb.query('SELECT * FROM proxy_hosts');
+    assert.equal(rows.find((row) => row.id === 'queued-host').edge_host_id, edgeHost.id);
+    assert.equal(rows.find((row) => row.id === 'other-host').edge_host_id, 777);
+    assert.equal((await memoryDb.query('SELECT * FROM proxy_mutation_queue')).rowCount, 0);
   });
 
   it('detects drift and performs 1-click reconciliation', async () => {

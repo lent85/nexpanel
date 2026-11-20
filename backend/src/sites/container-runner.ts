@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import * as path from 'node:path';
+import { getEnv } from '../config/env.js';
 import { Site } from '../db/types.js';
 
 export class ContainerRunner {
@@ -12,6 +14,11 @@ export class ContainerRunner {
     if (process.env.NODE_ENV === 'test') {
       return { started: true };
     }
+
+    const env = getEnv();
+    const volumePath = env.SITES_HOST_DATA_DIR
+      ? path.join(env.SITES_HOST_DATA_DIR, path.relative(env.SITES_DATA_DIR, site.volumePath))
+      : site.volumePath;
 
     return new Promise((resolve) => {
       // Check docker availability
@@ -31,7 +38,7 @@ export class ContainerRunner {
           '--name',
           site.originContainerName,
           '--network',
-          'proxy',
+          env.NPM_NETWORK,
           '--restart',
           'unless-stopped'
         ];
@@ -39,7 +46,7 @@ export class ContainerRunner {
         if (site.type === 'nodejs') {
           args.push(
             '-v',
-            `${site.volumePath}/htdocs:/app:rw`,
+            `${volumePath}/htdocs:/app:rw`,
             '-w',
             '/app',
             `node:${site.nodeVersion || '20'}-alpine`,
@@ -50,7 +57,7 @@ export class ContainerRunner {
         } else if (site.type === 'python') {
           args.push(
             '-v',
-            `${site.volumePath}/htdocs:/app:rw`,
+            `${volumePath}/htdocs:/app:rw`,
             '-w',
             '/app',
             'python:3.12-alpine',
@@ -61,20 +68,20 @@ export class ContainerRunner {
         } else if (site.type === 'static') {
           args.push(
             '-v',
-            `${site.volumePath}/conf/${site.domain}.conf:/etc/nginx/conf.d/default.conf:ro`,
+            `${volumePath}/conf/${site.domain}.conf:/etc/nginx/conf.d/default.conf:ro`,
             '-v',
-            `${site.volumePath}/htdocs:/data/sites/${site.domain}/htdocs:ro`,
+            `${volumePath}/htdocs:/data/sites/${site.domain}/htdocs:ro`,
             'nginx:alpine'
           );
         } else {
           // php / wordpress
           args.push(
             '-v',
-            `${site.volumePath}/conf/${site.domain}.conf:/etc/nginx/conf.d/default.conf:ro`,
+            `${volumePath}/conf/${site.domain}.conf:/etc/nginx/conf.d/default.conf:ro`,
             '-v',
-            `${site.volumePath}/htdocs:/data/sites/${site.domain}/htdocs:rw`,
+            `${volumePath}/htdocs:/data/sites/${site.domain}/htdocs:rw`,
             '-v',
-            `${site.volumePath}/logs:/data/sites/${site.domain}/logs:rw`,
+            `${volumePath}/logs:/data/sites/${site.domain}/logs:rw`,
             `php:${site.phpVersion || '8.3'}-alpine`,
             'sh',
             '-c',
@@ -90,7 +97,7 @@ export class ContainerRunner {
         proc.on('close', (runCode) => {
           if (runCode === 0) {
             // Also join 'sites' network for database connectivity
-            const netProc = spawn('docker', ['network', 'connect', 'sites', site.originContainerName]);
+            const netProc = spawn('docker', ['network', 'connect', env.SITES_NETWORK, site.originContainerName]);
             let netStderr = '';
             netProc.stderr.on('data', (d) => {
               netStderr += d.toString();
@@ -99,7 +106,7 @@ export class ContainerRunner {
               if (netCode === 0 || netStderr.includes('already exists in network') || netStderr.includes('already connected')) {
                 resolve({ started: true });
               } else {
-                resolve({ started: false, error: `Failed to attach container to 'sites' network: ${netStderr.trim()}` });
+                resolve({ started: false, error: `Failed to attach container to '${env.SITES_NETWORK}' network: ${netStderr.trim()}` });
               }
             });
             netProc.on('error', (err) => {

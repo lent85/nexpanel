@@ -61,7 +61,7 @@ describe('Milestone 4 Sites Runtime Lifecycle (FR-SITE-01 to 07, 10-12, 14)', ()
         };
       } else if (type === 'reverse_proxy') {
         payload.reverseProxy = {
-          upstreamUrl: 'http://192.168.1.50:8096'
+          upstreamUrl: 'http://media-service:8096'
         };
       }
 

@@ -65,6 +65,20 @@ export class SiteService {
     const db = getDb();
     const domain = input.domain.trim().toLowerCase();
 
+    let upstream: URL | undefined;
+    if (input.type === 'reverse_proxy') {
+      try {
+        upstream = new URL(input.reverseProxy?.upstreamUrl || '');
+        if (!['http:', 'https:'].includes(upstream.protocol) || upstream.username || upstream.password ||
+            upstream.pathname !== '/' || upstream.search || upstream.hash) {
+          throw new Error('Expected an HTTP or HTTPS upstream host with an optional port');
+        }
+        NpmEdgeProvider.validateForwardHost(upstream.hostname);
+      } catch (error) {
+        throw Object.assign(new Error((error as Error).message), { statusCode: 400 });
+      }
+    }
+
     // Check unique domain
     const existing = await db.query<Site>('SELECT id FROM sites WHERE domain = $1 AND deleted_at IS NULL', [domain]);
     if (existing.rows.length > 0) {
@@ -86,7 +100,9 @@ export class SiteService {
     const id = uuidv7();
     const now = new Date().toISOString();
     const phpVersion = input.type === 'wordpress' || input.type === 'php' ? input.phpVersion || '8.3' : undefined;
-    const originPort = input.type === 'reverse_proxy' ? 0 : 8080;
+    const originPort = 8080;
+    const forwardScheme: 'http' | 'https' = upstream?.protocol === 'https:' ? 'https' : 'http';
+    const forwardPort = upstream ? Number(upstream.port) || (forwardScheme === 'https' ? 443 : 80) : originPort;
     const docRoot = input.documentRoot || paths.htdocs;
 
     // Allocate isolated UID for host file permissions
@@ -95,6 +111,7 @@ export class SiteService {
 
     // Origin container names per docs/03 §3.5
     const originContainerName = `site-${slug}-web`;
+    const forwardHost = upstream?.hostname || originContainerName;
 
     // Insert site record early so child entities (site_databases, proxy_hosts) satisfy PostgreSQL foreign keys
     await db.execute(
@@ -206,7 +223,7 @@ export class SiteService {
     const vhostContent = VhostManager.renderVhost(templateName, {
       domain,
       aliases: input.aliases,
-      documentRoot: docRoot,
+      documentRoot: `/data/sites/${domain}/htdocs`,
       phpVersion,
       upstreamUrl: input.reverseProxy?.upstreamUrl
     });
@@ -247,64 +264,33 @@ export class SiteService {
       updatedAt: now
     });
 
-    // 5. Register proxy host with NPM (FR-PROXY-01, R1)
-    let edgeHostId: number | null = null;
-    let proxyStatus: 'in_sync' | 'drifted' = 'in_sync';
+    // Save desired routing before contacting the edge so retries have a stable local ID.
+    const proxyHostId = uuidv7();
+    const { provider, record } = await NpmEdgeProvider.resolve();
+    const proxyInput = {
+      domainNames: [domain, ...(input.aliases || [])],
+      forwardScheme,
+      forwardHost,
+      forwardPort,
+      http2Support: true,
+      websocketSupport: input.reverseProxy?.websocketSupport ?? true,
+      enabled: true
+    };
+    await db.execute(
+      `INSERT INTO proxy_hosts (id, site_id, edge_provider_id, edge_host_id, domain_names, forward_scheme, forward_host,
+        forward_port, drift_status, enabled, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [proxyHostId, id, record?.id ?? null, 0, proxyInput.domainNames, forwardScheme, forwardHost, forwardPort,
+        'missing_on_edge', true, now, now]
+    );
 
-    let forwardHost = originContainerName;
-    let forwardPort = originPort;
-
-    if (input.type === 'reverse_proxy' && input.reverseProxy?.upstreamUrl) {
+    if (originRes.started) {
       try {
-        const parsedUrl = new URL(input.reverseProxy.upstreamUrl);
-        forwardHost = parsedUrl.hostname;
-        forwardPort = parseInt(parsedUrl.port, 10) || (parsedUrl.protocol === 'https:' ? 443 : 80);
-      } catch {}
-    }
-
-    try {
-      const provider = await NpmEdgeProvider.getDefault();
-      const check = await provider.verifyConnection();
-      if (check.ok) {
-        const proxyRes = await provider.createHost({
-          domainNames: [domain, ...(input.aliases || [])],
-          forwardScheme: 'http',
-          forwardHost,
-          forwardPort,
-          http2Support: true,
-          websocketSupport: true,
-          enabled: true
-        });
-        edgeHostId = proxyRes.edgeId;
-      } else {
-        proxyStatus = 'drifted';
-        ProxyQueue.enqueue({
-          action: 'create',
-          payload: {
-            domainNames: [domain, ...(input.aliases || [])],
-            forwardScheme: 'http',
-            forwardHost,
-            forwardPort,
-            http2Support: true,
-            websocketSupport: true,
-            enabled: true
-          }
-        });
+        const result = await provider.createHost(proxyInput);
+        await ProxyQueue.recordCreatedHost(proxyHostId, result.edgeId);
+      } catch {
+        await ProxyQueue.enqueue({ action: 'create', proxyHostId, payload: proxyInput });
       }
-    } catch {
-      proxyStatus = 'drifted';
-      ProxyQueue.enqueue({
-        action: 'create',
-        payload: {
-          domainNames: [domain, ...(input.aliases || [])],
-          forwardScheme: 'http',
-          forwardHost,
-          forwardPort,
-          http2Support: true,
-          websocketSupport: true,
-          enabled: true
-        }
-      });
     }
 
     const siteStatus: SiteStatus = originRes.started ? 'live' : 'provisioning';
@@ -339,28 +325,6 @@ export class SiteService {
       `UPDATE sites SET status = $1, db_engine_id = $2, updated_at = $3 WHERE id = $4`,
       [site.status, site.dbEngineId || null, site.updatedAt, site.id]
     );
-
-    // Save proxy host record (linking edge_host_id and drift status)
-    const proxyHostId = uuidv7();
-    try {
-      await db.execute(
-        `INSERT INTO proxy_hosts (id, site_id, domain_names, forward_scheme, forward_host, forward_port, edge_host_id, drift_status, enabled, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [
-          proxyHostId,
-          site.id,
-          [domain, ...(input.aliases || [])],
-          'http',
-          originContainerName,
-          originPort,
-          edgeHostId,
-          proxyStatus,
-          true,
-          now,
-          now
-        ]
-      );
-    } catch {}
 
     await AuditService.log({
       actorUserId,

@@ -132,7 +132,7 @@ export type DriftStatus = 'in_sync' | 'drifted' | 'missing_on_edge' | 'orphan_on
 export interface ProxyHost {
   id: string;
   siteId?: string;
-  edgeProviderId: string;
+  edgeProviderId?: string;
   edgeHostId: number;
   domainNames: string[];
   forwardScheme: 'http' | 'https';

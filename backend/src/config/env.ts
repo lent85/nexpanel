@@ -49,6 +49,8 @@ export const envSchema = z.object({
   NPM_ADMIN_EMAIL: z.string().default('admin@example.com'),
   NPM_ADMIN_PASSWORD: z.string().default('changeme'),
   NPM_NETWORK: z.string().default('proxy'),
+  SITES_NETWORK: z.string().default('nexpanel-sites'),
+  SITES_HOST_DATA_DIR: z.string().optional(),
   NPM_LETSENCRYPT_EMAIL: z.string().default('admin@example.com'),
 
   // Site Defaults

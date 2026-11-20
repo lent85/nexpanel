@@ -7,7 +7,12 @@ import {
   EdgeHost,
   EdgeCertificate
 } from './types.js';
+import { isIP } from 'node:net';
 import { NpmClient } from './npm-client.js';
+import { getDb } from '../db/index.js';
+import { getEnv } from '../config/env.js';
+import { VaultService } from '../vault/vault.js';
+import { EdgeProvider as DbEdgeProvider } from '../db/types.js';
 
 export class NpmEdgeProvider implements EdgeProvider {
   readonly kind = 'npm' as const;
@@ -18,31 +23,73 @@ export class NpmEdgeProvider implements EdgeProvider {
   }
 
   public static async getDefault(): Promise<NpmEdgeProvider> {
-    const { getEnv } = await import('../config/env.js');
+    return (await this.resolve()).provider;
+  }
+
+  public static async resolve(providerId?: string): Promise<{ provider: NpmEdgeProvider; record?: DbEdgeProvider }> {
+    const db = getDb();
+    let query = 'SELECT * FROM edge_providers WHERE kind = $1 ORDER BY created_at ASC';
+    let params: any[] = ['npm'];
+
+    if (providerId) {
+      query = 'SELECT * FROM edge_providers WHERE id = $1';
+      params = [providerId];
+    }
+
+    const res = await db.query<DbEdgeProvider & { base_url?: string; admin_email?: string; credentials_secret_ref?: string }>(query, params);
+    if (res.rows.length === 0) {
+      if (providerId) throw Object.assign(new Error('Edge provider not found'), { statusCode: 404 });
+      // Return default instance from environment variables
+      const env = getEnv();
+      const client = new NpmClient({
+        baseUrl: env.NPM_BASE_URL,
+        adminEmail: env.NPM_ADMIN_EMAIL,
+        adminPassword: env.NPM_ADMIN_PASSWORD
+      });
+      return { provider: new NpmEdgeProvider(client) };
+    }
+
+    const record = res.rows[0];
     const env = getEnv();
+    const vault = new VaultService(env.VAULT_KEY_PATH);
+    let decryptedCreds: { password?: string; token?: string } = {};
+
+    const secretRef = record.credentials_secret_ref ?? record.credentialsSecretRef;
+    if (secretRef) {
+      try {
+        const raw = vault.decrypt(secretRef);
+        decryptedCreds = JSON.parse(raw);
+      } catch {
+        // fallback
+      }
+    }
+
+    const baseUrl = record.base_url || record.baseUrl || env.NPM_BASE_URL;
+    const adminEmail = record.admin_email || record.adminEmail || env.NPM_ADMIN_EMAIL;
+
     const client = new NpmClient({
-      baseUrl: env.NPM_BASE_URL,
-      adminEmail: env.NPM_ADMIN_EMAIL,
-      adminPassword: env.NPM_ADMIN_PASSWORD
+      baseUrl,
+      adminEmail,
+      adminPassword: decryptedCreds.password,
+      apiToken: decryptedCreds.token
     });
-    return new NpmEdgeProvider(client);
+
+    return { provider: new NpmEdgeProvider(client), record };
   }
 
   public static validateForwardHost(host: string): void {
     const trimmed = host.trim().toLowerCase();
-    if (trimmed === 'localhost' || trimmed === '127.0.0.1' || trimmed === '::1' || trimmed.startsWith('127.')) {
-      const err = new Error(
-        "Invalid forward_host: 'localhost' or '127.0.0.1' resolves to NPM container itself and causes a 502 Bad Gateway. Use the origin container name on the 'proxy' Docker network instead."
-      );
-      (err as any).statusCode = 400;
-      throw err;
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(trimmed) || isIP(trimmed) || trimmed === 'localhost') {
+      throw Object.assign(new Error(
+        "Invalid forward_host: use a Docker container or service name on the shared proxy network to avoid a 502 Bad Gateway. Do not use localhost, 127.0.0.1, IP addresses, or external hostnames."
+      ), { statusCode: 400 });
     }
   }
 
   async verifyConnection(): Promise<{ ok: boolean; version?: string; error?: string }> {
     try {
       const check = await this.client.health();
-      return { ok: check.ok, version: check.version || '2.16.0' };
+      return { ok: check.ok, version: check.version };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
@@ -124,16 +171,18 @@ export class NpmEdgeProvider implements EdgeProvider {
   }
 
   async uploadCertificate(input: CustomCertInput): Promise<{ edgeCertId: number }> {
-    const payload: Record<string, unknown> = {
-      provider: 'other',
-      nice_name: input.name,
-      certificate: input.certificate,
-      certificate_key: input.key,
-      intermediate_certificate: input.intermediate || ''
-    };
-
-    const res = await this.client.createCertificate(payload);
-    return { edgeCertId: res.id };
+    const { id } = await this.client.createCertificate({ provider: 'other', nice_name: input.name });
+    try {
+      await this.client.uploadCertificateFiles(id, {
+        certificate: input.certificate,
+        certificate_key: input.key,
+        ...(input.intermediate ? { intermediate_certificate: input.intermediate } : {})
+      });
+      return { edgeCertId: id };
+    } catch (error) {
+      await this.client.deleteCertificate(id).catch(() => {});
+      throw error;
+    }
   }
 
   async listCertificates(): Promise<EdgeCertificate[]> {
